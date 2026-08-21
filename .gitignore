@@ -1,0 +1,12 @@
+# Build artifacts
+a.out
+*.o
+*.exe
+
+# Private/local practice files
+paiza/
+
+# Local workspace metadata
+.agents/
+.codex/
+./

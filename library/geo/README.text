@@ -1,0 +1,23 @@
+./kyoupuro/library/geo
+
+競技プログラミング用の初等幾何ライブラリ。
+
+内容:
+
+- geo.cpp
+  点、直線、線分、円、多角形、凸包、距離、交点計算をまとめた 1 ファイル。
+
+- manual.text
+  使い方、型、関数一覧、ABC460 B / ABC467 D 型の呼び出し例。
+
+使うとき:
+
+project 直下の a.cpp から使う場合:
+
+#include "kyoupuro/library/geo/geo.cpp"
+
+kyoupuro/abc_practice/*.cpp などから使う場合:
+
+#include "../library/geo/geo.cpp"
+
+AtCoder に提出するときは、geo.cpp の中身を main より上に貼り付ける。

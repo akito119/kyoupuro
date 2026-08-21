@@ -1,0 +1,294 @@
+geo
+
+競技プログラミングでよく使う初等幾何の 2D ライブラリ。
+1 ファイルで貼れるようにしてある。
+
+ファイル:
+./kyoupuro/library/geo/geo.cpp
+
+ローカルでの include:
+
+project 直下の a.cpp から使う場合:
+
+#include "kyoupuro/library/geo/geo.cpp"
+
+kyoupuro/abc_practice/*.cpp などから使う場合:
+
+#include "../library/geo/geo.cpp"
+
+AtCoder へ提出するとき:
+
+AtCoder の提出環境には kyoupuro/library/geo/geo.cpp がない。
+提出時は geo.cpp の中身を main より上に貼り付ける。
+
+基本:
+
+- namespace は geo。
+- 整数座標で判定できるものは PointLL と __int128_t を使う。
+- 交点座標や距離など実数が必要なものは PointD と long double を使う。
+- EPS は 1e-12。
+- PI は acosl(-1.0L)。
+
+型:
+
+- geo::ll
+  long long。
+
+- geo::ld
+  long double。
+
+- geo::i128
+  __int128_t。
+
+- geo::Point<T>
+  T x, y を持つ点。
+  ==, !=, <, +, -, *, /, +=, -= が使える。
+  k * p も使える。
+
+- geo::PointLL
+  Point<long long>。
+
+- geo::PointD
+  Point<long double>。
+
+- geo::LineLL
+  ax + by = c を表す直線。
+  a, b, c は __int128_t。
+
+- geo::CircleLL
+  PointLL c と long long r を持つ円。
+  円は「円周」として扱う関数が多い。
+
+入出力:
+
+- operator>>(istream, Point<T>)
+  x y を読む。
+
+- operator<<(ostream, Point<T>)
+  x y を空白区切りで出す。
+
+符号・補助:
+
+- sgn_i128(x)
+  x > 0 なら 1、x == 0 なら 0、x < 0 なら -1。
+
+- sgn_ld(x)
+  EPS 付きで long double の符号を返す。
+
+- to_string_i128(x)
+  __int128_t を string に変換する。
+  __int128_t は cout へ直接出せないので、面積の 2 倍などを出すときに使う。
+
+整数ベクトル:
+
+- dot128(a, b)
+  PointLL の内積。
+
+- cross128(a, b)
+  PointLL の外積 a x b。
+
+- cross128(a, b, c)
+  (b - a) x (c - a)。
+
+- norm2_128(p)
+  |p|^2。
+
+- dist2_128(a, b)
+  2 点 a, b の距離の二乗。
+
+- ccw(a, b, c)
+  a -> b から見て c が左なら 1、右なら -1、一直線なら 0。
+
+線分・直線の整数判定:
+
+- on_segment_closed(a, b, p)
+  p が閉線分 ab 上にあるなら true。
+
+- segments_intersect_closed(a, b, c, d)
+  閉線分 ab と閉線分 cd が交わるなら true。
+  端点接触や重なりも true。
+
+- line_through_points(p, q)
+  p, q を通る直線 ax + by = c を返す。
+  p != q を想定。
+
+- perpendicular_bisector(p, q)
+  p, q の垂直二等分線 ax + by = c を返す。
+  p != q を想定。
+
+- lines_parallel(l1, l2)
+  2 直線が平行なら true。
+
+- same_line(l1, l2)
+  2 直線が同一直線なら true。
+
+- lines_have_common_point(l1, l2)
+  2 直線が共有点を持つなら true。
+  交差する場合と同一直線の場合が true。
+  平行で別直線なら false。
+
+共通中心:
+
+- concentric_circles_exist_through_pairs(p, q, r, s)
+  異なる 2 点 p, q を通る円と、異なる 2 点 r, s を通る円が、
+  同じ中心を持てるなら true。
+  内部では pq と rs の垂直二等分線が共有点を持つかを判定する。
+  p != q, r != s を想定。
+
+円の整数判定:
+
+- geo::CircleRelation
+  2 つの円周の位置関係。
+
+  Same:
+  同じ円。共有点は無限個。
+
+  Separate:
+  外側で離れている。共有点なし。
+
+  ExternallyTangent:
+  外接。共有点 1 個。
+
+  IntersectTwoPoints:
+  2 点で交わる。
+
+  InternallyTangent:
+  内接。共有点 1 個。
+
+  Contained:
+  片方がもう片方の内側で離れている。共有点なし。
+
+- circle_relation(a, b)
+  2 円周の位置関係を CircleRelation で返す。
+
+- circles_have_common_point(a, b)
+  2 円周に共有点が 1 個以上あれば true。
+  Same も true。
+
+- circle_common_point_count(a, b)
+  2 円周の共有点数を返す。
+  Same の場合は無限個なので -1。
+
+- point_circle_position(p, c)
+  点 p と円 c の位置関係を返す。
+  内側なら -1、円周上なら 0、外側なら 1。
+
+多角形:
+
+- polygon_area2_signed(poly)
+  符号付き面積の 2 倍を返す。
+  反時計回りなら正、時計回りなら負。
+
+- polygon_area2_abs(poly)
+  面積の 2 倍の絶対値を返す。
+
+- convex_hull(points)
+  凸包を反時計回りで返す。
+  辺上の中間点は含めない。
+  計算量 O(N log N)。
+
+- geo::PointInPolygon
+  点の多角形内判定結果。
+
+  Outside:
+  外部。
+
+  OnBoundary:
+  辺上または頂点上。
+
+  Inside:
+  内部。
+
+- point_in_polygon(poly, q)
+  点 q が多角形 poly の外部、境界上、内部のどこにあるかを返す。
+  poly は単純多角形を想定。
+
+実数ベクトル:
+
+- dot(a, b)
+  PointD の内積。
+
+- cross(a, b)
+  PointD の外積 a x b。
+
+- cross(a, b, c)
+  (b - a) x (c - a)。
+
+- norm2(p)
+  |p|^2。
+
+- dist(a, b)
+  2 点 a, b の距離。
+
+- perp(p)
+  p を反時計回りに 90 度回転したベクトルを返す。
+
+- unit(p)
+  p と同じ向きの単位ベクトルを返す。
+  p != (0, 0) を想定。
+
+- rotate(p, rad)
+  p を原点中心に rad ラジアン回転する。
+
+実数の射影・距離・交点:
+
+- projection_to_line(a, b, p)
+  点 p を直線 ab に射影した点を返す。
+  a != b を想定。
+
+- reflection_over_line(a, b, p)
+  点 p を直線 ab で反射した点を返す。
+  a != b を想定。
+
+- distance_point_line(a, b, p)
+  点 p と直線 ab の距離を返す。
+  a != b を想定。
+
+- distance_point_segment(a, b, p)
+  点 p と閉線分 ab の距離を返す。
+  a != b を想定。
+
+- line_intersection(a, b, c, d)
+  直線 ab と直線 cd の交点を optional<PointD> で返す。
+  平行なら nullopt。
+  a != b, c != d を想定。
+
+- circle_line_intersections(center, radius, a, b)
+  円と直線 ab の交点を vector<PointD> で返す。
+  交点なしなら 0 個、接するなら 1 個、交わるなら 2 個。
+  a != b を想定。
+
+- circle_circle_intersections(c1, r1, c2, r2)
+  2 円の交点を vector<PointD> で返す。
+  交点なしなら 0 個、接するなら 1 個、交わるなら 2 個。
+  同心円など共有点が無限個のケースも空 vector にしている。
+
+ABC460 B 型:
+
+int T;
+cin >> T;
+while (T--) {
+    long long x1, y1, r1, x2, y2, r2;
+    cin >> x1 >> y1 >> r1 >> x2 >> y2 >> r2;
+    CircleLL a{{x1, y1}, r1};
+    CircleLL b{{x2, y2}, r2};
+    cout << (circles_have_common_point(a, b) ? "Yes" : "No") << '\n';
+}
+
+ABC467 D 型:
+
+int T;
+cin >> T;
+while (T--) {
+    PointLL p, q, r, s;
+    cin >> p >> q >> r >> s;
+    cout << (concentric_circles_exist_through_pairs(p, q, r, s) ? "Yes" : "No") << '\n';
+}
+
+注意:
+
+- PointLL 系の判定は整数入力向け。
+- PointD 系は EPS = 1e-12 を使う。
+- 円の「共有点判定」は円盤ではなく円周の判定。
+- convex_hull は辺上の点を落とす。
+- __int128_t を直接 cout できないので、必要なら to_string_i128(x) を使う。
