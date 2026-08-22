@@ -4,7 +4,7 @@ using i64 = int64_t;
 using vi = vector<i64>;
 using vvi = vector<vi>;
 #define endl '\n'
-
+// from https://xuzijian629.hatenablog.com/entry/2018/12/08/000452
 class xorshift {
     uint64_t x;
 public:
