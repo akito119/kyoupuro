@@ -488,4 +488,3 @@ class cycle_base{
     }
 };
 
-using CycleSpace = cycle_base;
