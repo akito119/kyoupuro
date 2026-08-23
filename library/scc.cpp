@@ -7,7 +7,7 @@ using lint=int;
 #define rep(i, n) for (int i = 0; i < (int)(n); i++)
 int prime = 998244353;
 double pie = M_PI;
-//from ACL
+//from my library https://github.com/akito119/kyoupuro
 template <class E> struct csr {
     vector<int> start;
     vector<E> elist;

@@ -7,7 +7,7 @@ using lint=int;
 int prime = 998244353;
 double pie = M_PI;
 int inf = LLONG_MAX;
-
+//from my library https://github.com/akito119/kyoupuro
 lint main(){
     int n,m,y;
     cin>>n>>m>>y;

@@ -7,7 +7,7 @@ using lint=int;
 #define rep(i, n) for (int i = 0; i < (int)(n); i++)
 int prime = 998244353;
 double pie = M_PI;
-//from my library https://github.com/akito119/kyoupuro
+//from ACL
 
 struct dsu {
     private:
@@ -67,3 +67,18 @@ struct dsu {
         return result;
     }
 };
+
+lint main(){
+    int n,m;
+    cin>>n>>m;
+    dsu uni(n);
+    rep(i, m){
+        int a,b;
+        cin>>a>>b;
+        a--,b--;
+        uni.merge(a,b);
+    }
+    bool flag = true;
+
+    
+}

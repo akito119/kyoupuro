@@ -67,3 +67,57 @@ struct dsu {
         return result;
     }
 };
+
+lint main(){
+    int n,m;
+    cin>>n>>m;
+    dsu uni(n);
+    vector<vector<int>> g(n,vector<int> (0));
+    rep(i, m){
+        int u, v;
+        cin>>u>>v;
+        u--, v--;
+        g[u].push_back(v);
+        g[v].push_back(u);
+        uni.merge(u, v);
+    }
+
+    set<int> leaders;
+    rep(i ,n){
+        int j = uni.leader(i);
+       leaders.insert(i);
+    }
+    bool flag = true;
+    for(auto x:leaders){
+    int num = 1;
+    int now = x;
+    int prev = 0;
+    while(true){
+        int tmp = 0;
+        for(auto y:g[now]){
+            if(prev != y){
+                tmp = y;
+            }
+        }
+        prev = now;
+        now = tmp;
+        num ++;
+        //cout<<now<<endl;
+        if(now == 0){
+            break;
+        }
+        if(num > uni.size(x)){
+            break;
+        }
+    }
+    if(num != uni.size(x)+1){
+        flag = false;
+    }
+    }
+    if(flag){
+        cout<<"Yes"<<endl;
+    }
+    else{
+        cout<<"No"<<endl;
+    }
+}

@@ -7,7 +7,7 @@ using lint=int;
 #define rep(i, n) for (int i = 0; i < (int)(n); i++)
 int prime = 998244353;
 double pie = M_PI;
-//from my library https://github.com/akito119/kyoupuro
+
 class cycle_base{
     private:
     struct edge {
@@ -488,3 +488,16 @@ class cycle_base{
     }
 };
 
+lint main(){
+    int n, m;
+    cin>>n>>m;
+    cycle_base cy(n);
+    rep(i,m){
+        int a, b;
+        cin>>a>>b;
+        a--, b--;
+        cy.add_edge(a,b);
+    }
+    cy.build();
+    cout<<cy.rank()<<endl;
+}
