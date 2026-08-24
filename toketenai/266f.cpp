@@ -493,3 +493,30 @@ class cycle_base{
         return cycle_components_of_vertex_value[v];
     }
 };
+//x,yが同一円周上にいないことと同値
+//連結の仮定があるからunion-findいらない。
+lint main() {
+    int n;
+    cin>>n;
+    cycle_base cy(n);
+    rep(i,n){
+        int u, v;
+        cin>>u>>v;
+        u--,v--;
+        cy.add_edge(u,v);
+    }
+
+    cy.build();
+    int q;
+    cin>>q;
+    rep(i, q){
+        int x,y;
+        cin>>x>>y;
+        x--, y--;
+        if(cy.vertex_in_some_cycle(x)||cy.vertex_in_some_cycle(y)){
+            cout<<"No"<<endl;
+        }
+        else{
+            cout<<"Yes"<<endl;
+        }
+}
