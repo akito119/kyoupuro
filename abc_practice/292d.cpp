@@ -82,37 +82,17 @@ lint main(){
         uni.merge(u, v);
     }
 
-    set<int> leaders;
-    rep(i ,n){
-        int j = uni.leader(i);
-       leaders.insert(i);
+    map<int,int> c;
+    rep(i,n){
+        int l = uni.leader(i);
+        c[l] += g[i].size();
     }
     bool flag = true;
-    for(auto x:leaders){
-    int num = 1;
-    int now = x;
-    int prev = 0;
-    while(true){
-        int tmp = 0;
-        for(auto y:g[now]){
-            if(prev != y){
-                tmp = y;
-            }
+    for(auto x:c){
+        int l = x.first,y = x.second;
+        if(uni.size(l) != y/2){
+            flag = false;
         }
-        prev = now;
-        now = tmp;
-        num ++;
-        //cout<<now<<endl;
-        if(now == 0){
-            break;
-        }
-        if(num > uni.size(x)){
-            break;
-        }
-    }
-    if(num != uni.size(x)+1){
-        flag = false;
-    }
     }
     if(flag){
         cout<<"Yes"<<endl;
