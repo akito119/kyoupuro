@@ -1,0 +1,303 @@
+#include <bits/stdc++.h>
+using namespace std;
+using i64 = int64_t;
+using vi = vector<i64>;
+using vvi = vector<vi>;
+#define endl '\n'
+// from https://xuzijian629.hatenablog.com/entry/2018/12/08/000452
+class xorshift {
+    uint64_t x;
+public:
+    xorshift() {
+        mt19937 rnd(chrono::steady_clock::now().time_since_epoch().count());
+        x = rnd();
+        for (int i = 0; i < 100; i++) {
+            random();
+        }
+    }
+    uint64_t random() {
+        x = x ^ (x << 7);
+        return x = x ^ (x >> 9);
+    }
+};
+
+// for RMQ & RAQ
+constexpr int INF = __INT_MAX__;
+class ImplicitTreap {
+    xorshift rnd;
+    struct Node {
+        int value, min, lazy;
+        int priority, cnt;
+        bool rev;
+        Node *l, *r;
+        Node(int value, int priority) : value(value), min(INF), lazy(0), priority(priority), cnt(1), rev(false), l(nullptr), r(nullptr) {}
+    } *root = nullptr;
+    using Tree = Node *;
+
+    int cnt(Tree t) {
+        return t ? t->cnt : 0;
+    }
+
+    int get_min(Tree t) {
+        return t ? t->min : INF;
+    }
+
+    void update_cnt(Tree t) {
+        if (t) {
+            t->cnt = 1 + cnt(t->l) + cnt(t->r);
+        }
+    }
+
+    void update_min(Tree t) {
+        if (t) {
+            t->min = min(t->value, min(get_min(t->l), get_min(t->r)));
+        }
+    }
+
+    void pushup(Tree t) {
+        update_cnt(t), update_min(t);
+    }
+
+    void pushdown(Tree t) {
+        if (t && t->rev) {
+            t->rev = false;
+            swap(t->l, t->r);
+            if (t->l) t->l->rev ^= 1;
+            if (t->r) t->r->rev ^= 1;
+        }
+        if (t && t->lazy) {
+            if (t->l) {
+                t->l->lazy += t->lazy;
+                t->l->min += t->lazy;
+            }
+            if (t->r) {
+                t->r->lazy += t->lazy;
+                t->r->min += t->lazy;
+            }
+            t->value += t->lazy;
+            t->lazy = 0;
+        }
+        pushup(t);
+    }
+    
+    void split(Tree t, int key, Tree& l, Tree& r) {
+        if (!t) {
+            l = r = nullptr;
+            return;
+        }
+        pushdown(t);
+        int implicit_key = cnt(t->l) + 1;
+        if (key < implicit_key) {
+            split(t->l, key, l, t->l), r = t;
+        } else {
+            split(t->r, key - implicit_key, t->r, r), l = t;
+        }
+        pushup(t);
+    }
+    
+    void insert(Tree& t, int key, Tree item) {
+        Tree t1, t2;
+        split(t, key, t1, t2);
+        merge(t1, t1, item);
+        merge(t, t1, t2);
+    }
+
+    void merge(Tree& t, Tree l, Tree r) {
+        pushdown(l);
+        pushdown(r);
+        if (!l || !r) {
+            t = l ? l : r;
+        } else if (l->priority > r->priority) {
+            merge(l->r, l->r, r), t = l;
+        } else {
+            merge(r->l, l, r->l), t = r;
+        }
+        pushup(t);
+    }
+    
+    void erase(Tree& t, int key) {
+        Tree t1, t2, t3;
+        split(t, key + 1, t1, t2);
+        split(t1, key, t1, t3);
+        merge(t, t1, t2);
+    }
+
+    void add(Tree t, int l, int r, int x) {
+        Tree t1, t2, t3;
+        split(t, l, t1, t2);
+        split(t2, r - l, t2 , t3);
+        t2->lazy += x;
+        t2->min += x;
+        merge(t2, t2, t3);
+        merge(t, t1, t2);
+    }
+
+    int findmin(Tree t, int l, int r) {
+        Tree t1, t2, t3;
+        split(t, l, t1, t2);
+        split(t2, r - l, t2, t3);
+        int ret = t2->min;
+        merge(t2, t2, t3);
+        merge(t, t1, t2);
+        return ret;
+    }
+
+    void reverse(Tree t, int l, int r) {
+        if (l > r) return;
+        Tree t1, t2, t3;
+        split(t, l, t1, t2);
+        split(t2, r - l, t2, t3);
+        t2->rev ^= 1;
+        merge(t2, t2, t3);
+        merge(t, t1, t2);
+    }
+
+    // [l, r)の先頭がmになるように左シフトさせる。std::rotateと同じ仕様
+    void rotate(Tree t, int l, int m, int r) {
+        reverse(t, l, r);
+        reverse(t, l, l + r - m);
+        reverse(t, l + r - m, r);
+    }
+
+    void dump(Tree t) {
+        if (!t) return;
+        pushdown(t);
+        dump(t->l);
+        cout << t->value << " ";
+        dump(t->r);
+    }
+
+    int find_min_index(Tree t) {
+    if (!t) return -1;
+
+    pushdown(t);
+
+    int left_size = cnt(t->l);
+
+    // 左部分木に最小値があるなら左へ
+    if (t->l && get_min(t->l) == t->min) {
+        return find_min_index(t->l);
+    }
+
+    // 自分が最小値
+    if (t->value == t->min) {
+        return left_size;
+    }
+
+    // 右部分木に最小値がある
+    int res = find_min_index(t->r);
+    return left_size + 1 + res;
+   }
+    
+public:
+    void insert(int pos, int x) {
+        insert(root, pos, new Node(x, rnd.random()));
+    }
+
+    void add(int l, int r, int x) {
+        add(root, l, r, x);
+    }
+
+    int findmin(int l, int r) {
+        return findmin(root, l, r);
+    }
+
+    void erase(int pos) {
+        erase(root, pos);
+    }
+
+    void reverse(int l, int r) {
+        reverse(root, l, r);
+    }
+
+    void rotate(int l, int m, int r) {
+        rotate(root, l, m, r);
+    }
+
+    void dump() {
+        dump(root);
+        cout << endl;
+    }
+    int find_min_index() {
+        return find_min_index(root);
+    }
+};
+
+
+int main(){
+    int n;
+    string s;
+    int Q;
+    cin>>n>>s>>Q;
+    ImplicitTreap tr;
+    int num = 0;
+    int pre = 0;
+    vector<int> a(n);
+    for(int i = 0;i<n;i++){
+        if(s[i] == 'A'){
+            pre++;
+            tr.insert(num,pre);
+            num++;
+        }
+        else{
+            pre--;
+            tr.insert(num,pre);
+            num++;
+        }
+    }
+    for(int i= 0;i<Q;i++){
+        int t;
+        cin>>t;
+        if(t==1){
+            int i;
+            char c;
+            cin>>i>>c;
+            i--;
+            if(s[i] == c){
+                continue;
+            }
+
+            if(c == 'B'){
+                tr.add(i,n,-2);
+            }
+            else{
+                tr.add(i,n,2);
+            }
+            s[i] = c;
+        }
+        else{
+            int l,r;
+
+            cin>>l>>r;
+            l--,r--;
+            
+            if(l == r){
+                if(s[l] == 'B'){
+                    cout<<"No"<<endl;
+                }
+                else{
+                    cout<<"Yes"<<endl;
+                }
+                continue;
+            }
+            int m = 0;
+            if(l != 0){
+                m = tr.findmin(l-1,l);
+            }
+            //cout<<l<<endl;
+            //cout<<1<<endl;
+            //tr.dump();
+            tr.add(l,r+1,-m);
+            //cout<<2<<endl;
+            //cout<<m<<endl;
+            int v = tr.findmin(l,r+1);
+            if(v >= 0){
+                cout<<"Yes"<<endl;
+            }
+            else{
+                cout<<"No"<<endl;
+            }
+            tr.add(l,r+1,m);
+        }
+    }
+}
