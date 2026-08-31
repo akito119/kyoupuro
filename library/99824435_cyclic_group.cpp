@@ -86,5 +86,15 @@ class CyclicGroup{
     }
     bool operator<=(const CyclicGroup& other) const {
         return x <= other.x;
-    }    
+    }
+    friend ostream& operator<<(ostream& os, const CyclicGroup& a) {
+        return os << a.x;
+    }
+
+    friend istream& operator>>(istream& is, CyclicGroup& a) {
+        int value;
+        is >> value;
+        a.x = (value % prime + prime) % prime;
+        return is;
+    }
 };
