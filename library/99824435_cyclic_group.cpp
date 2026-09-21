@@ -16,20 +16,7 @@ class CyclicGroup{
     }
     int proInvElement() const{
         assert(x != 0);
-        int res = 1;
-        int n = prime - 2;
-        int a = x;
-
-        while(n > 0){
-            if(n & 1) {
-                res = res * a % prime;
-            }
-
-            a = a * a % prime;
-            n >>= 1;
-        }
-
-        return res;
+        return pow(prime - 2).x;
     }
     public:
     CyclicGroup() : x(0) {}
@@ -66,6 +53,41 @@ class CyclicGroup{
     CyclicGroup& operator/=(const CyclicGroup& other) {
         *this = *this / other;
         return *this;
+    }
+
+    // Binary exponentiation: returns (*this)^exponent.
+    CyclicGroup pow(int exponent) const {
+        assert(exponent >= 0);
+        CyclicGroup res = 1;
+        CyclicGroup base = *this;
+
+        while(exponent > 0) {
+            if(exponent & 1) {
+                res *= base;
+            }
+            base *= base;
+            exponent >>= 1;
+        }
+
+        return res;
+    }
+
+    // Returns nCr modulo prime. This implementation requires 0 <= n < prime.
+    static CyclicGroup combination(int n, int r) {
+        assert(0 <= n && n < prime);
+        if(r < 0 || r > n) {
+            return 0;
+        }
+
+        r = min(r, n - r);
+        CyclicGroup numerator = 1;
+        CyclicGroup denominator = 1;
+        for(int i = 1; i <= r; i++) {
+            numerator *= n - r + i;
+            denominator *= i;
+        }
+
+        return numerator / denominator;
     }
 
     bool operator==(const CyclicGroup& other) const {
