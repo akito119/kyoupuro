@@ -28,6 +28,13 @@ char ranchar(
     return chars[ranint<size_t>(0, chars.size() - 1)];
 }
 
+// 1なら大文字、0なら小文字
+char ranchar(bool uppercase) {
+    return ranchar(uppercase
+        ? string_view("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        : string_view("abcdefghijklmnopqrstuvwxyz"));
+}
+
 // 指定した長さの文字列
 string ranstring(
     int len,
