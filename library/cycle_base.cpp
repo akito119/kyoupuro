@@ -1,495 +1,835 @@
 #include <bits/stdc++.h>
 using namespace std;
-using lint=int;
-#define int long long
-#define int128 __int128_t
-#define double long double
-#define rep(i, n) for (int i = 0; i < (int)(n); i++)
-int prime = 998244353;
-double pie = M_PI;
-//from my library https://github.com/akito119/kyoupuro
-class cycle_base{
-    private:
-    struct edge {
-        int to;
-        int id;
-    };
 
-    struct undirected_edge {
-        int from;
-        int to;
-    };
-
+// Implicit fundamental-cycle basis for an undirected multigraph.
+class cycle_base {
+    struct edge_data { int u, v; long long weight; };
     struct dsu {
-        vector<int> parent_or_size;
-
-        dsu() {}
-        explicit dsu(int n) : parent_or_size(n, -1) {}
-
-        int leader(int a) {
-            if(parent_or_size[a] < 0) return a;
-            return parent_or_size[a] = leader(parent_or_size[a]);
-        }
-
+        vector<int> p;
+        explicit dsu(int n = 0) : p(n, -1) {}
+        int leader(int v) { return p[v] < 0 ? v : p[v] = leader(p[v]); }
+        int leader_const(int v) const { while(p[v] >= 0) v = p[v]; return v; }
+        int size(int v) { return -p[leader(v)]; }
+        bool same(int a, int b) { return leader(a) == leader(b); }
         int merge(int a, int b) {
-            int x = leader(a), y = leader(b);
-            if(x == y) return x;
-            if(-parent_or_size[x] < -parent_or_size[y]) swap(x, y);
-            parent_or_size[x] += parent_or_size[y];
-            parent_or_size[y] = x;
-            return x;
+            a = leader(a); b = leader(b);
+            if(a == b) return a;
+            if(-p[a] < -p[b]) swap(a, b);
+            p[a] += p[b]; p[b] = a;
+            return a;
         }
-    };
+    } uf;
 
-    struct flow_edge {
-        int to;
-        int rev;
-        int cap;
-        int original_edge_id;
-        int from_vertex;
-        int to_vertex;
-    };
+    int n, log_n, components_value, odd_cycle_basis_value = -1;
+    vector<edge_data> edges;
+    vector<vector<pair<int, int>>> forest;
+    vector<char> tree_edge;
+    vector<int> chord_of_basis_value, basis_of_chord_value;
+    vector<int> parent, parent_edge, depth;
+    vector<vector<int>> up;
+    vector<long long> dist;
+    vector<int> component_edges;
 
-    int n;
-    vector<undirected_edge> edges;
-    vector<vector<edge>> g;
-
-    bool built;
-    int component_count;
-    int cycle_component_count_value;
-
-    vector<int> parent;
-    vector<int> parent_edge;
-    vector<int> depth;
-    vector<int> component;
-    vector<bool> is_tree_edge_value;
-
-    vector<vector<int>> basis_edges_value;
-    vector<vector<int>> basis_vertices_value;
-    vector<int> chord_of_basis_value;
-    vector<int> basis_of_chord_value;
-    vector<vector<int>> basis_of_edge_value;
-    vector<vector<int>> basis_of_vertex_value;
-    vector<int> cycle_component_of_basis_value;
-    vector<vector<int>> cycle_components_of_vertex_value;
-
-    void check_vertex(int v) const {
-        assert(0 <= v && v < n);
+    void check_vertex(int v) const { assert(0 <= v && v < n); }
+    void check_edge(int e) const { assert(0 <= e && e < (int)edges.size()); }
+    void check_basis(int b) const { assert(0 <= b && b < rank()); }
+    void set_ancestors(int v, int p) {
+        up[v][0] = p;
+        for(int k = 1; k < log_n; k++)
+            up[v][k] = up[v][k - 1] == -1 ? -1 : up[up[v][k - 1]][k - 1];
+    }
+    void link_forest(int a, int b, int edge_id) {
+        if(uf.size(a) > uf.size(b)) swap(a, b);
+        struct state { int v, p, pe, d; long long w; };
+        vector<state> stack = {{a, b, edge_id, depth[b] + 1,
+                                dist[b] + edges[edge_id].weight}};
+        while(!stack.empty()) {
+            auto [v, p, pe, d, w] = stack.back(); stack.pop_back();
+            parent[v] = p; parent_edge[v] = pe; depth[v] = d; dist[v] = w;
+            set_ancestors(v, p);
+            for(auto [to, id] : forest[v]) if(to != p)
+                stack.push_back({to, v, id, d + 1, w + edges[id].weight});
+        }
+        int ra = uf.leader(a), rb = uf.leader(b);
+        int total = component_edges[ra] + component_edges[rb] + 1;
+        int root = uf.merge(ra, rb);
+        component_edges[root] = total;
+        forest[a].push_back({b, edge_id});
+        forest[b].push_back({a, edge_id});
+        components_value--;
+    }
+    int lca(int a, int b) const {
+        assert(uf.leader_const(a) == uf.leader_const(b));
+        if(depth[a] < depth[b]) swap(a, b);
+        int diff = depth[a] - depth[b];
+        for(int k = 0; k < log_n; k++) if(diff >> k & 1) a = up[a][k];
+        if(a == b) return a;
+        for(int k = log_n - 1; k >= 0; k--) if(up[a][k] != up[b][k]) {
+            a = up[a][k]; b = up[b][k];
+        }
+        return parent[a];
     }
 
-    void check_edge(int e) const {
-        assert(0 <= e && e < (int)edges.size());
-    }
-
-    void check_built() const {
-        assert(built);
-    }
-
-    pair<vector<int>, vector<int>> restore_fundamental_cycle(int chord) const {
-        int u = edges[chord].from;
-        int v = edges[chord].to;
-        int a = u, b = v;
-
-        vector<int> left_edges, right_edges;
-        vector<int> left_vertices, right_vertices;
-        left_vertices.push_back(u);
-        right_vertices.push_back(v);
-
-        while(depth[a] > depth[b]) {
-            left_edges.push_back(parent_edge[a]);
-            a = parent[a];
-            left_vertices.push_back(a);
-        }
-        while(depth[b] > depth[a]) {
-            right_edges.push_back(parent_edge[b]);
-            b = parent[b];
-            right_vertices.push_back(b);
-        }
-        while(a != b) {
-            left_edges.push_back(parent_edge[a]);
-            a = parent[a];
-            left_vertices.push_back(a);
-
-            right_edges.push_back(parent_edge[b]);
-            b = parent[b];
-            right_vertices.push_back(b);
-        }
-
-        vector<int> cycle_edges = left_edges;
-        for(int i = (int)right_edges.size() - 1; i >= 0; i--) {
-            cycle_edges.push_back(right_edges[i]);
-        }
-        cycle_edges.push_back(chord);
-
-        vector<int> cycle_vertices = left_vertices;
-        for(int i = (int)right_vertices.size() - 2; i >= 0; i--) {
-            cycle_vertices.push_back(right_vertices[i]);
-        }
-
-        return {cycle_edges, cycle_vertices};
-    }
-
-    void add_flow_edge(vector<vector<flow_edge>>& fg, int from, int to, int cap,
-                       int original_edge_id = -1, int from_vertex = -1, int to_vertex = -1) const {
-        flow_edge fwd = {to, (int)fg[to].size(), cap, original_edge_id, from_vertex, to_vertex};
-        flow_edge rev = {from, (int)fg[from].size(), 0, -1, -1, -1};
-        fg[from].push_back(fwd);
-        fg[to].push_back(rev);
-    }
-
-    int max_flow_two_paths(vector<vector<flow_edge>>& fg, int source, int sink) const {
-        int flow = 0;
-        const int node_count = fg.size();
-        vector<int> level(node_count), iter(node_count);
-
-        auto bfs = [&]() -> bool {
-            fill(level.begin(), level.end(), -1);
-            queue<int> q;
-            level[source] = 0;
-            q.push(source);
-            while(!q.empty()) {
-                int v = q.front();
-                q.pop();
-                for(const auto& e : fg[v]) {
-                    if(e.cap == 0 || level[e.to] != -1) continue;
-                    level[e.to] = level[v] + 1;
-                    q.push(e.to);
-                }
-            }
-            return level[sink] != -1;
-        };
-
-        auto dfs = [&](auto self, int v, int pushed) -> int {
-            if(v == sink) return pushed;
-            for(int& i = iter[v]; i < (int)fg[v].size(); i++) {
-                flow_edge& e = fg[v][i];
-                if(e.cap == 0 || level[e.to] != level[v] + 1) continue;
-                int add = self(self, e.to, min(pushed, e.cap));
-                if(add == 0) continue;
-                e.cap -= add;
-                fg[e.to][e.rev].cap += add;
-                return add;
-            }
-            return 0LL;
-        };
-
-        while(flow < 2 && bfs()) {
-            fill(iter.begin(), iter.end(), 0);
-            while(flow < 2) {
-                int pushed = dfs(dfs, source, 2 - flow);
-                if(pushed == 0) break;
-                flow += pushed;
-            }
-        }
-        return flow;
-    }
-
-    vector<int> restore_flow_path(int s, int t, vector<vector<pair<int, int>>>& used) const {
-        vector<int> path;
-
-        auto dfs = [&](auto self, int v) -> bool {
-            if(v == t) return true;
-            while(!used[v].empty()) {
-                auto [to, id] = used[v].back();
-                used[v].pop_back();
-                path.push_back(id);
-                if(self(self, to)) return true;
-                path.pop_back();
-            }
-            return false;
-        };
-
-        bool ok = dfs(dfs, s);
-        if(!ok) return {};
-        return path;
-    }
-
-    int first_common_cycle_component(int u, int v) const {
-        const auto& a = cycle_components_of_vertex_value[u];
-        const auto& b = cycle_components_of_vertex_value[v];
-        int i = 0, j = 0;
-        while(i < (int)a.size() && j < (int)b.size()) {
-            if(a[i] == b[j]) return a[i];
-            if(a[i] < b[j]) i++;
-            else j++;
-        }
-        return -1;
-    }
-
-    public:
+public:
+    struct basis_descriptor { int chord, u, v; };
     explicit cycle_base(int n_)
-        : n(n_), g(n_), built(false), component_count(0), cycle_component_count_value(0) {}
-
-    void add_edge(int u, int v) {
-        check_vertex(u);
-        check_vertex(v);
-        int id = edges.size();
-        edges.push_back({u, v});
-        g[u].push_back({v, id});
-        g[v].push_back({u, id});
-        built = false;
+        : uf(n_), n(n_), log_n(1), components_value(n_), forest(n_),
+          parent(n_, -1), parent_edge(n_, -1), depth(n_, 0), dist(n_, 0),
+          component_edges(n_, 0) {
+        assert(n >= 0);
+        while((1LL << log_n) <= max(1, n)) log_n++;
+        up.assign(n, vector<int>(log_n, -1));
+    }
+    void reserve_edges(int m) {
+        edges.reserve(m); tree_edge.reserve(m);
+        basis_of_chord_value.reserve(m); chord_of_basis_value.reserve(m);
     }
 
-    void build() {
-        int m = edges.size();
-        built = false;
-        component_count = 0;
-        cycle_component_count_value = 0;
-
-        parent.assign(n, -1);
-        parent_edge.assign(n, -1);
-        depth.assign(n, 0);
-        component.assign(n, -1);
-        is_tree_edge_value.assign(m, false);
-        basis_edges_value.clear();
-        basis_vertices_value.clear();
-        chord_of_basis_value.clear();
-        basis_of_chord_value.assign(m, -1);
-        basis_of_edge_value.assign(m, {});
-        basis_of_vertex_value.assign(n, {});
-        cycle_component_of_basis_value.clear();
-        cycle_components_of_vertex_value.assign(n, {});
-
-        for(int root = 0; root < n; root++) {
-            if(component[root] != -1) continue;
-            queue<int> q;
-            component[root] = component_count;
-            parent[root] = -1;
-            parent_edge[root] = -1;
-            depth[root] = 0;
-            q.push(root);
-
-            while(!q.empty()) {
-                int v = q.front();
-                q.pop();
-                for(const auto& e : g[v]) {
-                    if(component[e.to] != -1) continue;
-                    component[e.to] = component_count;
-                    parent[e.to] = v;
-                    parent_edge[e.to] = e.id;
-                    depth[e.to] = depth[v] + 1;
-                    is_tree_edge_value[e.id] = true;
-                    q.push(e.to);
-                }
-            }
-
-            component_count++;
-        }
-
-        for(int id = 0; id < m; id++) {
-            if(is_tree_edge_value[id]) continue;
-            auto [cycle_edges, cycle_vertices] = restore_fundamental_cycle(id);
-            int basis_id = basis_edges_value.size();
-            basis_edges_value.push_back(cycle_edges);
-            basis_vertices_value.push_back(cycle_vertices);
+    // All additions: O(Q alpha(N) + N log^2 N).  A returned witness additionally
+    // costs its output size.
+    int add_edge(int u, int v, long long weight = 1) {
+        check_vertex(u); check_vertex(v);
+        int id = edge_count();
+        edges.push_back({u, v, weight});
+        tree_edge.push_back(false);
+        basis_of_chord_value.push_back(-1);
+        if(!uf.same(u, v)) {
+            tree_edge[id] = true;
+            link_forest(u, v, id);
+        } else {
+            component_edges[uf.leader(u)]++;
+            basis_of_chord_value[id] = rank();
             chord_of_basis_value.push_back(id);
-            basis_of_chord_value[id] = basis_id;
+            if(odd_cycle_basis_value == -1 && ((depth[u] ^ depth[v]) & 1) == 0)
+                odd_cycle_basis_value = basis_of_chord_value[id];
         }
+        return id;
+    }
+    void build() {} // compatibility: maintained online
 
-        for(int i = 0; i < (int)basis_edges_value.size(); i++) {
-            for(int e : basis_edges_value[i]) {
-                basis_of_edge_value[e].push_back(i);
-            }
-            for(int v : basis_vertices_value[i]) {
-                basis_of_vertex_value[v].push_back(i);
-            }
-        }
-
-        dsu basis_dsu((int)basis_edges_value.size());
-        for(int e = 0; e < m; e++) {
-            const auto& bs = basis_of_edge_value[e];
-            for(int i = 1; i < (int)bs.size(); i++) {
-                basis_dsu.merge(bs[0], bs[i]);
-            }
-        }
-
-        map<int, int> compressed;
-        cycle_component_of_basis_value.assign(basis_edges_value.size(), -1);
-        for(int i = 0; i < (int)basis_edges_value.size(); i++) {
-            int leader = basis_dsu.leader(i);
-            if(!compressed.count(leader)) {
-                int id = compressed.size();
-                compressed[leader] = id;
-            }
-            cycle_component_of_basis_value[i] = compressed[leader];
-        }
-        cycle_component_count_value = compressed.size();
-
-        for(int v = 0; v < n; v++) {
-            for(int b : basis_of_vertex_value[v]) {
-                cycle_components_of_vertex_value[v].push_back(cycle_component_of_basis_value[b]);
-            }
-            sort(cycle_components_of_vertex_value[v].begin(), cycle_components_of_vertex_value[v].end());
-            cycle_components_of_vertex_value[v].erase(
-                unique(cycle_components_of_vertex_value[v].begin(), cycle_components_of_vertex_value[v].end()),
-                cycle_components_of_vertex_value[v].end()
-            );
-        }
-
-        built = true;
+    int vertex_count() const { return n; }
+    int edge_count() const { return edges.size(); }
+    int rank() const { return chord_of_basis_value.size(); }
+    int connected_components() const { return components_value; }
+    bool connected(int u, int v) { check_vertex(u); check_vertex(v); return uf.same(u, v); }
+    bool would_create_cycle(int u, int v) { return connected(u, v); }
+    bool is_tree_edge(int e) const { check_edge(e); return tree_edge[e]; }
+    pair<int, int> edge_endpoints(int e) const { check_edge(e); return {edges[e].u, edges[e].v}; }
+    long long edge_weight(int e) const { check_edge(e); return edges[e].weight; }
+    int chord_of_basis(int b) const { check_basis(b); return chord_of_basis_value[b]; }
+    int basis_of_chord(int e) const { check_edge(e); return basis_of_chord_value[e]; }
+    basis_descriptor basis(int b) const {
+        check_basis(b); int e = chord_of_basis_value[b];
+        return {e, edges[e].u, edges[e].v};
+    }
+    int component_rank(int v) {
+        check_vertex(v); int r = uf.leader(v);
+        return component_edges[r] - uf.size(r) + 1;
+    }
+    bool component_is_tree(int v) { return component_rank(v) == 0; }
+    bool component_is_unicyclic(int v) { return component_rank(v) == 1; }
+    bool is_bipartite() const { return odd_cycle_basis_value == -1; }
+    int odd_cycle_basis() const { return odd_cycle_basis_value; }
+    vector<int> odd_cycle_edges() const {
+        return is_bipartite() ? vector<int>{} : materialize_basis_edges(odd_cycle_basis_value);
     }
 
-    int rank() const {
-        check_built();
-        return basis_edges_value.size();
+    int basis_cycle_size(int b) const {
+        auto [e, u, v] = basis(b); int w = lca(u, v);
+        return depth[u] + depth[v] - 2 * depth[w] + 1;
+    }
+    long long basis_cycle_weight(int b) const {
+        auto [e, u, v] = basis(b); int w = lca(u, v);
+        return dist[u] + dist[v] - 2 * dist[w] + edges[e].weight;
+    }
+    vector<int> materialize_basis_edges(int b) const {
+        auto [chord, u, v] = basis(b); int w = lca(u, v);
+        vector<int> left, right;
+        while(u != w) { left.push_back(parent_edge[u]); u = parent[u]; }
+        while(v != w) { right.push_back(parent_edge[v]); v = parent[v]; }
+        reverse(right.begin(), right.end());
+        left.insert(left.end(), right.begin(), right.end());
+        left.push_back(chord);
+        return left;
+    }
+    vector<int> materialize_basis_vertices(int b) const {
+        auto [chord, u, v] = basis(b); int w = lca(u, v);
+        vector<int> left, right;
+        while(u != w) { left.push_back(u); u = parent[u]; }
+        left.push_back(w);
+        while(v != w) { right.push_back(v); v = parent[v]; }
+        reverse(right.begin(), right.end());
+        left.insert(left.end(), right.begin(), right.end());
+        return left;
     }
 
-    int connected_components() const {
-        check_built();
-        return component_count;
-    }
-
-    const vector<vector<int>>& basis_edges() const {
-        check_built();
-        return basis_edges_value;
-    }
-
-    const vector<vector<int>>& basis_vertices() const {
-        check_built();
-        return basis_vertices_value;
-    }
-
-    const vector<int>& bases_containing_edge(int e) const {
-        check_built();
-        check_edge(e);
-        return basis_of_edge_value[e];
-    }
-
-    const vector<int>& bases_containing_vertex(int v) const {
-        check_built();
-        check_vertex(v);
-        return basis_of_vertex_value[v];
-    }
-
-    bool in_some_cycle(int e) const {
-        check_built();
-        check_edge(e);
-        return !basis_of_edge_value[e].empty();
-    }
-
-    bool same_cycle(int u, int v) const {
-        check_built();
-        check_vertex(u);
-        check_vertex(v);
-        return first_common_cycle_component(u, v) != -1;
-    }//頂点u,vをともに含むサイクルが存在するかを判定する
-
-    bool vertex_in_some_cycle(int v) const {
-    check_built();
-    check_vertex(v);
-    return !basis_of_vertex_value[v].empty();
-    }//頂点vを含むサイクルが存在するかを判定する
-
-    vector<int> get_cycle(int u, int v) const {
-        check_built();
-        check_vertex(u);
-        check_vertex(v);
-        int common_component = first_common_cycle_component(u, v);
-        if(common_component == -1) return {};
-
-        if(u == v) {
-            for(int b : basis_of_vertex_value[u]) {
-                if(cycle_component_of_basis_value[b] == common_component) {
-                    return basis_edges_value[b];
-                }
-            }
-            return {};
-        }
-
-        vector<bool> edge_in_component(edges.size(), false);
-        for(int b = 0; b < (int)basis_edges_value.size(); b++) {
-            if(cycle_component_of_basis_value[b] != common_component) continue;
-            for(int e : basis_edges_value[b]) edge_in_component[e] = true;
-        }
-
-        int flow_node_count = 2 * n;
-        vector<vector<flow_edge>> fg(flow_node_count);
-        auto vin = [&](int x) { return 2 * x; };
-        auto vout = [&](int x) { return 2 * x + 1; };
-
-        for(int x = 0; x < n; x++) {
-            int cap = (x == u || x == v ? 2 : 1);
-            add_flow_edge(fg, vin(x), vout(x), cap);
-        }
-        for(int id = 0; id < (int)edges.size(); id++) {
-            if(!edge_in_component[id]) continue;
-            int a = edges[id].from;
-            int b = edges[id].to;
-            if(a == b) continue;
-            add_flow_edge(fg, vout(a), vin(b), 1, id, a, b);
-            add_flow_edge(fg, vout(b), vin(a), 1, id, b, a);
-        }
-
-        int flow = max_flow_two_paths(fg, vout(u), vin(v));
-        if(flow < 2) return {};
-
-        vector<vector<pair<int, int>>> used(n);
-        for(int from = 0; from < flow_node_count; from++) {
-            for(const auto& e : fg[from]) {
-                if(e.original_edge_id == -1) continue;
-                if(e.cap != 0) continue;
-                used[e.from_vertex].push_back({e.to_vertex, e.original_edge_id});
-            }
-        }
-
-        vector<int> path1 = restore_flow_path(u, v, used);
-        vector<int> path2 = restore_flow_path(u, v, used);
-        if(path1.empty() || path2.empty()) return {};
-
-        vector<int> cycle = path1;
-        for(int i = (int)path2.size() - 1; i >= 0; i--) {
-            cycle.push_back(path2[i]);
-        }
-        return cycle;
-    }
-
-    vector<bool> coordinate(const vector<int>& edge_set) const {
-        check_built();
-        vector<bool> used(edges.size(), false);
+    vector<int> odd_degree_vertices(const vector<int>& edge_set) const {
+        vector<char> odd(n, false);
         for(int e : edge_set) {
             check_edge(e);
-            used[e] = true;
+            odd[edges[e].u] ^= 1;
+            odd[edges[e].v] ^= 1;
         }
-
-        vector<bool> coef(basis_edges_value.size(), false);
-        for(int i = 0; i < (int)basis_edges_value.size(); i++) {
-            coef[i] = used[chord_of_basis_value[i]];
-        }
-        return coef;
-    }
-
-    vector<int> compose(const vector<bool>& coef) const {
-        check_built();
-        assert((int)coef.size() == (int)basis_edges_value.size());
-        vector<bool> used(edges.size(), false);
-        for(int i = 0; i < (int)basis_edges_value.size(); i++) {
-            if(!coef[i]) continue;
-            for(int e : basis_edges_value[i]) {
-                used[e] = !used[e];
-            }
-        }
-
         vector<int> result;
-        for(int e = 0; e < (int)edges.size(); e++) {
-            if(used[e]) result.push_back(e);
+        for(int v = 0; v < n; v++) if(odd[v]) result.push_back(v);
+        return result;
+    }
+    bool is_cycle_space_element(const vector<int>& s) const { return odd_degree_vertices(s).empty(); }
+    vector<bool> coordinate_unchecked(const vector<int>& edge_set) const {
+        vector<bool> result(rank(), false);
+        for(int e : edge_set) {
+            check_edge(e); int b = basis_of_chord_value[e];
+            if(b != -1) result[b] = !result[b];
+        }
+        return result;
+    }
+    vector<bool> coordinate(const vector<int>& edge_set) const {
+        assert(is_cycle_space_element(edge_set));
+        return coordinate_unchecked(edge_set);
+    }
+    vector<int> sparse_coordinate(const vector<int>& edge_set) const {
+        assert(is_cycle_space_element(edge_set));
+        vector<int> ids;
+        for(int e : edge_set) {
+            check_edge(e);
+            if(basis_of_chord_value[e] != -1) ids.push_back(basis_of_chord_value[e]);
+        }
+        sort(ids.begin(), ids.end());
+        vector<int> result;
+        for(int i = 0; i < (int)ids.size();) {
+            int j = i + 1;
+            while(j < (int)ids.size() && ids[j] == ids[i]) j++;
+            if((j - i) & 1) result.push_back(ids[i]);
+            i = j;
         }
         return result;
     }
 
-    int cycle_component_count() const {
-        check_built();
-        return cycle_component_count_value;
+    // Tree difference: O(N + rank + answer), independent of total basis length.
+    vector<int> compose(const vector<bool>& coefficient) const {
+        assert((int)coefficient.size() == rank());
+        vector<char> delta(n, false); vector<int> result;
+        for(int b = 0; b < rank(); b++) if(coefficient[b]) {
+            int e = chord_of_basis_value[b]; result.push_back(e);
+            delta[edges[e].u] ^= 1; delta[edges[e].v] ^= 1;
+        }
+        vector<vector<int>> children(n); vector<int> order;
+        order.reserve(n);
+        for(int v = 0; v < n; v++) {
+            if(parent[v] == -1) order.push_back(v);
+            else children[parent[v]].push_back(v);
+        }
+        for(int i = 0; i < (int)order.size(); i++)
+            for(int to : children[order[i]]) order.push_back(to);
+        for(int i = n - 1; i >= 0; i--) {
+            int v = order[i];
+            if(parent[v] != -1 && delta[v]) {
+                result.push_back(parent_edge[v]); delta[parent[v]] ^= 1;
+            }
+        }
+        return result;
+    }
+    vector<int> compose_sparse(const vector<int>& basis_ids) const {
+        vector<int> ids = basis_ids;
+        for(int b : ids) check_basis(b);
+        sort(ids.begin(), ids.end());
+        vector<char> delta(n, false);
+        vector<int> result;
+        for(int i = 0; i < (int)ids.size();) {
+            int j = i + 1;
+            while(j < (int)ids.size() && ids[j] == ids[i]) j++;
+            if((j - i) & 1) {
+                int e = chord_of_basis_value[ids[i]];
+                result.push_back(e);
+                delta[edges[e].u] ^= 1;
+                delta[edges[e].v] ^= 1;
+            }
+            i = j;
+        }
+        vector<vector<int>> children(n);
+        vector<int> order;
+        order.reserve(n);
+        for(int v = 0; v < n; v++) {
+            if(parent[v] == -1) order.push_back(v);
+            else children[parent[v]].push_back(v);
+        }
+        for(int i = 0; i < (int)order.size(); i++)
+            for(int to : children[order[i]]) order.push_back(to);
+        for(int i = n - 1; i >= 0; i--) {
+            int v = order[i];
+            if(parent[v] != -1 && delta[v]) {
+                result.push_back(parent_edge[v]);
+                delta[parent[v]] ^= 1;
+            }
+        }
+        return result;
     }
 
-    int cycle_component_of_basis(int i) const {
-        check_built();
-        assert(0 <= i && i < (int)cycle_component_of_basis_value.size());
-        return cycle_component_of_basis_value[i];
+    // Solves boundary(x)=odd_vertices inside the affine space whose chord
+    // coordinates are coefficient.  nullopt means that some connected
+    // component contains an odd number of requested boundary vertices.
+    optional<vector<int>> compose_with_boundary(
+        const vector<int>& odd_vertices, const vector<bool>& coefficient) const {
+        assert((int)coefficient.size() == rank());
+        vector<char> delta(n, false);
+        vector<int> result;
+        for(int v : odd_vertices) { check_vertex(v); delta[v] ^= 1; }
+        for(int b = 0; b < rank(); b++) if(coefficient[b]) {
+            int e = chord_of_basis_value[b];
+            result.push_back(e);
+            delta[edges[e].u] ^= 1;
+            delta[edges[e].v] ^= 1;
+        }
+        vector<vector<int>> children(n);
+        vector<int> order;
+        order.reserve(n);
+        for(int v = 0; v < n; v++) {
+            if(parent[v] == -1) order.push_back(v);
+            else children[parent[v]].push_back(v);
+        }
+        for(int i = 0; i < (int)order.size(); i++)
+            for(int to : children[order[i]]) order.push_back(to);
+        for(int i = n - 1; i >= 0; i--) {
+            int v = order[i];
+            if(parent[v] == -1) {
+                if(delta[v]) return nullopt;
+            } else if(delta[v]) {
+                result.push_back(parent_edge[v]);
+                delta[parent[v]] ^= 1;
+            }
+        }
+        return result;
+    }
+    optional<vector<int>> chain_from_coordinate(
+        int s, int t, const vector<bool>& coefficient) const {
+        check_vertex(s); check_vertex(t);
+        return compose_with_boundary({s, t}, coefficient);
+    }
+    bool boundary_feasible(const vector<int>& odd_vertices) const {
+        vector<char> parity(n, false);
+        for(int v : odd_vertices) {
+            check_vertex(v);
+            parity[uf.leader_const(v)] ^= 1;
+        }
+        for(char x : parity) if(x) return false;
+        return true;
+    }
+    long long boundary_fiber_size_mod(
+        const vector<int>& odd_vertices, long long mod) const {
+        assert(mod > 0);
+        return boundary_feasible(odd_vertices) ? cycle_space_size_mod(mod) : 0;
+    }
+    long long cycle_space_size_mod(long long mod) const {
+        assert(mod > 0); long long a = 2 % mod, e = rank(), result = 1 % mod;
+        while(e) {
+            if(e & 1) result = (__int128)result * a % mod;
+            a = (__int128)a * a % mod; e >>= 1;
+        }
+        return result;
+    }
+};
+
+// Terminal-preserving leaf pruning and degree-2 contraction.  It preserves all
+// terminal paths but may retain cyclic blocks attached at one articulation.
+// Each kernel edge remembers its original edge path.
+class cycle_core {
+public:
+    struct original_edge { int u, v; long long weight; };
+    struct core_edge {
+        int u, v;
+        long long weight;
+        vector<int> original_edges;
+    };
+    struct result {
+        vector<int> original_vertex; // core vertex -> original vertex
+        vector<int> core_vertex;     // original vertex -> core vertex, or -1
+        vector<core_edge> edges;
+        vector<char> active_original_vertex;
+    };
+
+private:
+    int n;
+    vector<original_edge> edges;
+    vector<vector<pair<int, int>>> graph;
+
+public:
+    explicit cycle_core(int n_) : n(n_), graph(n_) { assert(n >= 0); }
+    int add_edge(int u, int v, long long weight = 1) {
+        assert(0 <= u && u < n && 0 <= v && v < n);
+        int id = edges.size();
+        edges.push_back({u, v, weight});
+        graph[u].push_back({v, id});
+        graph[v].push_back({u, id});
+        return id;
     }
 
-    const vector<int>& cycle_components_of_vertex(int v) const {
+    // Nonterminal leaves are irrelevant to terminal-to-terminal simple paths.
+    // Remaining non-junction degree-2 paths are contracted into weighted edges.
+    result compress(const vector<int>& terminals) const {
+        vector<char> terminal(n, false), active(n, true);
+        for(int v : terminals) { assert(0 <= v && v < n); terminal[v] = true; }
+        vector<int> degree(n);
+        queue<int> q;
+        for(int v = 0; v < n; v++) {
+            degree[v] = graph[v].size();
+            if(!terminal[v] && degree[v] <= 1) q.push(v);
+        }
+        while(!q.empty()) {
+            int v = q.front(); q.pop();
+            if(!active[v] || terminal[v] || degree[v] > 1) continue;
+            active[v] = false;
+            for(auto [to, id] : graph[v]) if(active[to]) {
+                if(--degree[to] <= 1 && !terminal[to]) q.push(to);
+            }
+        }
+
+        vector<char> junction(n, false), seen(n, false);
+        for(int v = 0; v < n; v++)
+            if(active[v] && (terminal[v] || degree[v] != 2)) junction[v] = true;
+
+        // A terminal-free pure-cycle component has no natural junction.  Pick
+        // one representative so the cycle becomes a kernel self-loop.
+        for(int s = 0; s < n; s++) if(active[s] && !seen[s]) {
+            vector<int> component;
+            vector<int> stack = {s}; seen[s] = true;
+            bool has_junction = false;
+            while(!stack.empty()) {
+                int v = stack.back(); stack.pop_back();
+                component.push_back(v); has_junction |= junction[v];
+                for(auto [to, id] : graph[v]) if(active[to] && !seen[to]) {
+                    seen[to] = true; stack.push_back(to);
+                }
+            }
+            if(!has_junction) junction[component[0]] = true;
+        }
+
+        result out;
+        out.core_vertex.assign(n, -1);
+        out.active_original_vertex = active;
+        for(int v = 0; v < n; v++) if(junction[v]) {
+            out.core_vertex[v] = out.original_vertex.size();
+            out.original_vertex.push_back(v);
+        }
+
+        vector<char> used(edges.size(), false);
+        for(int s : out.original_vertex) {
+            for(auto [first_to, first_edge] : graph[s]) {
+                if(!active[first_to] || used[first_edge]) continue;
+                vector<int> path;
+                long long weight = 0;
+                int v = s, to = first_to, id = first_edge;
+                while(true) {
+                    used[id] = true;
+                    path.push_back(id);
+                    weight += edges[id].weight;
+                    v = to;
+                    if(junction[v]) break;
+                    int next_to = -1, next_id = -1;
+                    for(auto [candidate, eid] : graph[v])
+                        if(active[candidate] && eid != id) {
+                            next_to = candidate; next_id = eid; break;
+                        }
+                    assert(next_id != -1);
+                    to = next_to; id = next_id;
+                }
+                out.edges.push_back({out.core_vertex[s], out.core_vertex[v],
+                                     weight, move(path)});
+            }
+        }
+        return out;
+    }
+};
+
+// A bit-parallel cycle space for a graph with at most 64 edges.  Intended for
+// exhaustive algorithms parameterized by the cyclomatic rank after cycle_core.
+class small_cycle_space64 {
+    struct edge_data { int u, v; long long weight; };
+    struct dsu {
+        vector<int> p;
+        explicit dsu(int n) : p(n, -1) {}
+        int leader(int v) { return p[v] < 0 ? v : p[v] = leader(p[v]); }
+        bool merge(int a, int b) {
+            a = leader(a); b = leader(b);
+            if(a == b) return false;
+            if(-p[a] < -p[b]) swap(a, b);
+            p[a] += p[b]; p[b] = a;
+            return true;
+        }
+    };
+
+    int n;
+    bool built = false;
+    vector<edge_data> edges;
+    vector<vector<pair<int, int>>> graph, forest;
+    vector<int> parent, parent_edge, depth, order;
+    vector<char> tree_edge;
+    vector<int> chord_of_basis;
+    vector<uint64_t> basis_masks;
+
+    void check_built() const { assert(built); }
+    void check_vertex(int v) const { assert(0 <= v && v < n); }
+
+public:
+    explicit small_cycle_space64(int n_) : n(n_), graph(n_), forest(n_) {
+        assert(n >= 0);
+    }
+    explicit small_cycle_space64(const cycle_core::result& core)
+        : small_cycle_space64((int)core.original_vertex.size()) {
+        for(const auto& e : core.edges) add_edge(e.u, e.v, e.weight);
+        build();
+    }
+    int add_edge(int u, int v, long long weight = 1) {
+        check_vertex(u); check_vertex(v);
+        assert(edges.size() < 64);
+        int id = edges.size();
+        edges.push_back({u, v, weight});
+        graph[u].push_back({v, id});
+        graph[v].push_back({u, id});
+        built = false;
+        return id;
+    }
+    void build() {
+        int m = edges.size();
+        dsu uf(n);
+        forest.assign(n, {});
+        tree_edge.assign(m, false);
+        chord_of_basis.clear();
+        for(int e = 0; e < m; e++) {
+            auto [u, v, weight] = edges[e];
+            if(uf.merge(u, v)) {
+                tree_edge[e] = true;
+                forest[u].push_back({v, e});
+                forest[v].push_back({u, e});
+            } else chord_of_basis.push_back(e);
+        }
+
+        parent.assign(n, -1);
+        parent_edge.assign(n, -1);
+        depth.assign(n, 0);
+        order.clear();
+        vector<char> seen(n, false);
+        for(int root = 0; root < n; root++) if(!seen[root]) {
+            seen[root] = true;
+            vector<int> stack = {root};
+            while(!stack.empty()) {
+                int v = stack.back(); stack.pop_back();
+                order.push_back(v);
+                for(auto [to, e] : forest[v]) if(to != parent[v]) {
+                    parent[to] = v;
+                    parent_edge[to] = e;
+                    depth[to] = depth[v] + 1;
+                    seen[to] = true;
+                    stack.push_back(to);
+                }
+            }
+        }
+
+        basis_masks.clear();
+        for(int chord : chord_of_basis) {
+            int u = edges[chord].u, v = edges[chord].v;
+            uint64_t mask = uint64_t(1) << chord;
+            while(depth[u] > depth[v]) {
+                mask ^= uint64_t(1) << parent_edge[u]; u = parent[u];
+            }
+            while(depth[v] > depth[u]) {
+                mask ^= uint64_t(1) << parent_edge[v]; v = parent[v];
+            }
+            while(u != v) {
+                mask ^= uint64_t(1) << parent_edge[u]; u = parent[u];
+                mask ^= uint64_t(1) << parent_edge[v]; v = parent[v];
+            }
+            basis_masks.push_back(mask);
+        }
+        built = true;
+    }
+
+    int edge_count() const { return edges.size(); }
+    int rank() const { check_built(); return basis_masks.size(); }
+    uint64_t basis_mask(int b) const {
+        check_built(); assert(0 <= b && b < rank()); return basis_masks[b];
+    }
+    uint64_t compose_mask(uint64_t coordinate) const {
         check_built();
-        check_vertex(v);
-        return cycle_components_of_vertex_value[v];
+        if(rank() < 64) assert((coordinate >> rank()) == 0);
+        uint64_t result = 0;
+        while(coordinate) {
+            int b = __builtin_ctzll(coordinate);
+            result ^= basis_masks[b];
+            coordinate &= coordinate - 1;
+        }
+        return result;
+    }
+    uint64_t coordinate_mask(uint64_t edge_mask) const {
+        check_built();
+        if(edge_count() < 64) assert((edge_mask >> edge_count()) == 0);
+        uint64_t coordinate = 0;
+        for(int b = 0; b < rank(); b++)
+            if(edge_mask >> chord_of_basis[b] & 1) coordinate |= uint64_t(1) << b;
+        return coordinate;
+    }
+    bool is_cycle_mask(uint64_t edge_mask) const {
+        check_built();
+        if(edge_count() < 64) assert((edge_mask >> edge_count()) == 0);
+        vector<char> odd(n, false);
+        for(int e = 0; e < edge_count(); e++) if(edge_mask >> e & 1) {
+            odd[edges[e].u] ^= 1;
+            odd[edges[e].v] ^= 1;
+        }
+        return find(odd.begin(), odd.end(), true) == odd.end();
+    }
+
+    optional<uint64_t> affine_mask(
+        const vector<int>& odd_vertices, uint64_t coordinate = 0) const {
+        check_built();
+        uint64_t result = compose_mask(coordinate);
+        vector<char> delta(n, false);
+        for(int v : odd_vertices) { check_vertex(v); delta[v] ^= 1; }
+        for(int i = (int)order.size() - 1; i >= 0; i--) {
+            int v = order[i];
+            if(parent[v] == -1) {
+                if(delta[v]) return nullopt;
+            } else if(delta[v]) {
+                result ^= uint64_t(1) << parent_edge[v];
+                delta[parent[v]] ^= 1;
+            }
+        }
+        return result;
+    }
+
+    // Enumerates an affine fiber in Gray-code order.  Successive masks differ
+    // by exactly one fundamental cycle XOR.  max_rank prevents accidental blowup.
+    template<class Callback>
+    bool enumerate_affine(const vector<int>& odd_vertices, int max_rank,
+                          Callback callback) const {
+        check_built();
+        assert(0 <= max_rank && max_rank <= 62);
+        if(rank() > max_rank) return false;
+        auto initial = affine_mask(odd_vertices, 0);
+        if(!initial) return false;
+        uint64_t current = *initial;
+        uint64_t count = uint64_t(1) << rank();
+        callback(current, uint64_t(0));
+        for(uint64_t i = 1; i < count; i++) {
+            int changed_basis = __builtin_ctzll(i);
+            current ^= basis_masks[changed_basis];
+            uint64_t gray_coordinate = i ^ (i >> 1);
+            callback(current, gray_coordinate);
+        }
+        return true;
+    }
+
+    bool is_simple_path(uint64_t mask, int s, int t) const {
+        check_built(); check_vertex(s); check_vertex(t);
+        if(edge_count() < 64) assert((mask >> edge_count()) == 0);
+        if(s == t) return false;
+        vector<int> degree(n, 0);
+        for(int e = 0; e < edge_count(); e++) if(mask >> e & 1) {
+            int u = edges[e].u, v = edges[e].v;
+            if(u == v) degree[u] += 2;
+            else { degree[u]++; degree[v]++; }
+        }
+        if(degree[s] != 1 || degree[t] != 1) return false;
+        for(int v = 0; v < n; v++)
+            if(v != s && v != t && degree[v] != 0 && degree[v] != 2) return false;
+
+        vector<char> seen(n, false);
+        vector<int> stack = {s}; seen[s] = true;
+        while(!stack.empty()) {
+            int v = stack.back(); stack.pop_back();
+            for(auto [to, e] : graph[v])
+                if((mask >> e & 1) && !seen[to]) { seen[to] = true; stack.push_back(to); }
+        }
+        if(!seen[t]) return false;
+        for(int e = 0; e < edge_count(); e++) if(mask >> e & 1)
+            if(!seen[edges[e].u]) return false;
+        return true;
+    }
+    long long mask_weight(uint64_t mask) const {
+        check_built();
+        if(edge_count() < 64) assert((mask >> edge_count()) == 0);
+        long long result = 0;
+        for(int e = 0; e < edge_count(); e++) if(mask >> e & 1) result += edges[e].weight;
+        return result;
+    }
+};
+
+// Incremental bridges and 2-edge-connected components.
+class incremental_bridge_graph {
+    int n, bridges_value = 0, lca_iteration = 0;
+    vector<int> dsu_2ecc, dsu_cc, cc_size, parent, parent_edge, last_visit;
+    vector<char> bridge;
+    vector<int> cover_edge, cyclic_at;
+    int find_2ecc(int v) {
+        if(v == -1) return -1;
+        return dsu_2ecc[v] == v ? v : dsu_2ecc[v] = find_2ecc(dsu_2ecc[v]);
+    }
+    int find_cc(int v) {
+        v = find_2ecc(v);
+        return dsu_cc[v] == v ? v : dsu_cc[v] = find_cc(dsu_cc[v]);
+    }
+    void make_root(int v) {
+        v = find_2ecc(v);
+        int root = v, child = -1, child_edge = -1;
+        while(v != -1) {
+            int p = find_2ecc(parent[v]), pe = parent_edge[v];
+            parent[v] = child; parent_edge[v] = child_edge; dsu_cc[v] = root;
+            child = v; child_edge = pe; v = p;
+        }
+        cc_size[root] = cc_size[child];
+    }
+    void remove_bridge(int e, int witness) {
+        if(e == -1 || !bridge[e]) return;
+        bridge[e] = false; cover_edge[e] = witness; cyclic_at[e] = witness; bridges_value--;
+    }
+    void merge_path(int a, int b, int witness) {
+        ++lca_iteration; vector<int> pa, pb; int lca = -1;
+        while(lca == -1) {
+            if(a != -1) {
+                a = find_2ecc(a); pa.push_back(a);
+                if(last_visit[a] == lca_iteration) { lca = a; break; }
+                last_visit[a] = lca_iteration; a = parent[a];
+            }
+            if(b != -1) {
+                b = find_2ecc(b); pb.push_back(b);
+                if(last_visit[b] == lca_iteration) { lca = b; break; }
+                last_visit[b] = lca_iteration; b = parent[b];
+            }
+        }
+        for(int v : pa) { dsu_2ecc[v] = lca; if(v == lca) break; remove_bridge(parent_edge[v], witness); }
+        for(int v : pb) { dsu_2ecc[v] = lca; if(v == lca) break; remove_bridge(parent_edge[v], witness); }
+    }
+public:
+    explicit incremental_bridge_graph(int n_)
+        : n(n_), dsu_2ecc(n_), dsu_cc(n_), cc_size(n_, 1), parent(n_, -1),
+          parent_edge(n_, -1), last_visit(n_, 0) {
+        iota(dsu_2ecc.begin(), dsu_2ecc.end(), 0);
+        iota(dsu_cc.begin(), dsu_cc.end(), 0);
+    }
+    int add_edge(int a, int b) {
+        assert(0 <= a && a < n && 0 <= b && b < n);
+        int id = edge_count(); bridge.push_back(false);
+        cover_edge.push_back(id); cyclic_at.push_back(id);
+        int x = find_2ecc(a), y = find_2ecc(b);
+        if(x == y) return id;
+        int ca = find_cc(x), cb = find_cc(y);
+        if(ca != cb) {
+            bridge[id] = true; cover_edge[id] = cyclic_at[id] = -1; bridges_value++;
+            if(cc_size[ca] > cc_size[cb]) { swap(x, y); swap(ca, cb); }
+            make_root(x); parent[x] = y; parent_edge[x] = id;
+            dsu_cc[x] = y; cc_size[cb] += cc_size[x];
+        } else merge_path(x, y, id);
+        return id;
+    }
+    int edge_count() const { return bridge.size(); }
+    int bridge_count() const { return bridges_value; }
+    bool is_bridge(int e) const { assert(0 <= e && e < edge_count()); return bridge[e]; }
+    bool connected(int a, int b) {
+        assert(0 <= a && a < n && 0 <= b && b < n);
+        return find_cc(a) == find_cc(b);
+    }
+    bool same_2edge_component(int a, int b) {
+        assert(0 <= a && a < n && 0 <= b && b < n);
+        return find_2ecc(a) == find_2ecc(b);
+    }
+    int cycle_witness_edge(int e) const {
+        assert(0 <= e && e < edge_count()); return bridge[e] ? -1 : cover_edge[e];
+    }
+    int became_cyclic_at(int e) const {
+        assert(0 <= e && e < edge_count()); return cyclic_at[e];
+    }
+};
+
+// The image of a graph cycle space under XOR edge labels.
+template<class UInt = uint64_t, int Bits = numeric_limits<UInt>::digits>
+class xor_cycle_basis {
+    static_assert(is_unsigned_v<UInt>);
+    static_assert(0 < Bits && Bits <= numeric_limits<UInt>::digits);
+    static constexpr UInt value_mask() {
+        if constexpr(Bits == numeric_limits<UInt>::digits) return ~UInt(0);
+        else return (UInt(1) << Bits) - 1;
+    }
+    static bool valid_value(UInt x) { return (x & ~value_mask()) == 0; }
+    struct linear_basis {
+        array<UInt, Bits> a{}; int dimension = 0;
+        bool insert(UInt x) {
+            for(int k = Bits - 1; k >= 0; k--) if(x >> k & UInt(1)) {
+                if(!a[k]) { a[k] = x; dimension++; return true; }
+                x ^= a[k];
+            }
+            return false;
+        }
+        bool contains(UInt x) const {
+            for(int k = Bits - 1; k >= 0; k--) if(x >> k & UInt(1)) {
+                if(!a[k]) return false; x ^= a[k];
+            }
+            return true;
+        }
+        UInt maximize(UInt x) const { for(int k = Bits - 1; k >= 0; k--) x = max(x, x ^ a[k]); return x; }
+        UInt minimize(UInt x) const { for(int k = Bits - 1; k >= 0; k--) x = min(x, x ^ a[k]); return x; }
+        void merge_from(const linear_basis& o) { for(UInt x : o.a) if(x) insert(x); }
+    };
+    int n;
+    vector<int> parent, size_value;
+    vector<int> anchor;
+    vector<UInt> xor_to_parent;
+    vector<linear_basis> cycles;
+    pair<int, UInt> find(int v) {
+        if(parent[v] == v) return {v, 0};
+        auto [r, x] = find(parent[v]);
+        xor_to_parent[v] ^= x; parent[v] = r;
+        return {r, xor_to_parent[v]};
+    }
+public:
+    explicit xor_cycle_basis(int n_)
+        : n(n_), parent(n_), size_value(n_, 1), anchor(n_),
+          xor_to_parent(n_, 0), cycles(n_) {
+        iota(parent.begin(), parent.end(), 0);
+        iota(anchor.begin(), anchor.end(), 0);
+    }
+    optional<UInt> add_edge(int u, int v, UInt label) {
+        assert(0 <= u && u < n && 0 <= v && v < n);
+        assert(valid_value(label));
+        auto [ru, xu] = find(u); auto [rv, xv] = find(v);
+        UInt value = xu ^ xv ^ label;
+        if(ru == rv) { cycles[ru].insert(value); return value; }
+        if(size_value[ru] < size_value[rv]) swap(ru, rv);
+        parent[rv] = ru; xor_to_parent[rv] = value;
+        size_value[ru] += size_value[rv];
+        anchor[ru] = min(anchor[ru], anchor[rv]);
+        cycles[ru].merge_from(cycles[rv]);
+        return nullopt;
+    }
+    bool connected(int u, int v) {
+        assert(0 <= u && u < n && 0 <= v && v < n);
+        return find(u).first == find(v).first;
+    }
+    int image_rank(int v) {
+        assert(0 <= v && v < n);
+        return cycles[find(v).first].dimension;
+    }
+    bool cycle_space_xor_representable(int v, UInt x) {
+        assert(0 <= v && v < n && valid_value(x));
+        return cycles[find(v).first].contains(x);
+    }
+    UInt normalize_cycle_coset(int v, UInt x) {
+        assert(0 <= v && v < n && valid_value(x));
+        return cycles[find(v).first].minimize(x);
+    }
+    UInt canonical_vertex_value(int v) {
+        assert(0 <= v && v < n);
+        auto [root, potential] = find(v);
+        auto [same_root, anchor_potential] = find(anchor[root]);
+        assert(root == same_root);
+        return cycles[root].minimize(potential ^ anchor_potential);
+    }
+    UInt maximum_walk_xor(int u, int v) {
+        assert(0 <= u && u < n && 0 <= v && v < n);
+        auto [ru, xu] = find(u); auto [rv, xv] = find(v); assert(ru == rv);
+        return cycles[ru].maximize(xu ^ xv);
+    }
+    UInt minimum_walk_xor(int u, int v) {
+        assert(0 <= u && u < n && 0 <= v && v < n);
+        auto [ru, xu] = find(u); auto [rv, xv] = find(v); assert(ru == rv);
+        return cycles[ru].minimize(xu ^ xv);
     }
 };

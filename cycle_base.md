@@ -1,800 +1,409 @@
+# Cycle basis library
 
-# CycleSpace ライブラリ設計メモ
+競技プログラミング向けの無向グラフ用ライブラリ。
+全サイクルを明示保存せず、数学的なサイクル空間と構造的な橋・2-edge connectivityを分離する。
 
-無向グラフのサイクルを \(\mathbb{F}_2\) 上の cycle space として扱う。
-
-今回は計算量として最悪 \(O(NM)\) まで許容し、fundamental cycle basis を明示的に保持する。
-その代わり、サイクルに関する問い合わせや構成をできるだけ豊富に提供する。
-
----
-
-# 1. データ構造
-
-## 1.1 グラフ
-
-辺には必ず ID を振る。
+実装は `library/cycle_base.cpp` にあり、次の3クラスからなる。
 
 ```cpp
-struct Edge {
-    int to;
-    int id;
+cycle_base                  // 暗黙fundamental cycle basis
+cycle_core                  // terminalを保つ低cycle-rank kernel
+small_cycle_space64         // 64辺以下のbit並列・指数列挙層
+incremental_bridge_graph    // 追加専用bridge / 2-edge-connected components
+xor_cycle_basis<UInt, Bits> // XORラベルへのcycle-space像
+```
+
+## 1. 数学的背景
+
+グラフを1次元CW複体、係数体を `F_2` とみなす。
+
+```text
+C_1 = F_2^E
+C_0 = F_2^V
+boundary(uv) = u + v
+Z_1 = ker(boundary)
+```
+
+2-cellを持たないため、`Z_1` はそのまま1次ホモロジーである。
+辺集合が `Z_1` に属することと、全頂点の次数が偶数であることは同値。
+
+連結成分数を `c` とすると、rank-nullityまたはEuler標数から
+
+```text
+dim Z_1 = m - n + c
+```
+
+となる。これは単純サイクルの個数ではなく、Eulerian辺集合の線形空間の次元である。
+Eulerian辺集合の総数は `2^(m-n+c)`。
+
+### Fundamental basis
+
+spanning forest `T` を固定する。各非木辺（chord）`e=(u,v)` に対して
+
+```text
+B_e = e XOR path_T(u,v)
+```
+
+を作ると、全ての `B_e` が `Z_1` の基底になる。
+
+各 `B_e` は固有のchord `e` を1本だけ持つため、基底行列のchord部分は単位行列になる。
+したがってEulerian辺集合 `X` の基底座標は、単に `X` に含まれるchordの集合である。
+Gaussian eliminationも全基底の展開も不要。
+
+## 2. `cycle_base`
+
+### 設計
+
+辺追加時にUnion-Findで次を決める。
+
+- 異なる連結成分を結ぶ辺: forest edge
+- 同じ連結成分内の辺: chord、新しいbasis
+
+forest edgeで小さい連結成分を大きい側へ接続し、小さい側だけ根を付け替える。
+各頂点が小さい側に入る回数は高々 `O(log N)`。
+根の付け替え時にbinary lifting表も更新する。
+
+基底の正本は次だけである。
+
+```cpp
+struct basis_descriptor {
+    int chord;
+    int u;
+    int v;
 };
 ```
 
-```cpp
-vector<vector<Edge>> g;
-```
+木上パスは問い合わせ時だけ復元する。
 
-cycle space は本質的に頂点集合ではなく辺集合を \(\mathbb F_2\) 上で扱うため、
-サイクルの内部表現も基本的には edge id を利用する。
+### 計算量
 
----
-
-## 1.2 Spanning Forest
-
-fundamental cycle basis を作るため、各連結成分について spanning tree を構築する。
-
-保持する情報:
-
-```cpp
-vector<int> parent;
-vector<int> parent_edge;
-vector<int> depth;
-vector<int> component;
-vector<bool> is_tree_edge;
-```
-
-意味:
+`Q` 回の追加全体:
 
 ```text
-parent[v]
-    spanning forest 上での親
-
-parent_edge[v]
-    parent[v] と v を結ぶ辺 ID
-
-depth[v]
-    spanning forest 上での深さ
-
-component[v]
-    元グラフ上の連結成分 ID
-
-is_tree_edge[e]
-    spanning forest に採用された辺か
+O(Q alpha(N) + N log^2 N)
 ```
 
----
-
-## 1.3 Fundamental Cycle Basis
-
-spanning forest に含まれない辺 \(e=(u,v)\) ごとに
-
-\[
-B_e
-===
-
-e
-\oplus
-\text{tree-path}(u,v)
-\]
-
-を作る。
-
-これを fundamental cycle basis とする。
-
-保持する:
-
-```cpp
-vector<vector<int>> basis_edges;
-vector<vector<int>> basis_vertices;
-```
-
-ただしメモリを抑えたい場合は `basis_edges` のみを本体として、
-`basis_vertices` は必要時に生成してもよい。
-
-基底数は
-
-\[
-K=M-N+C
-\]
-
-である。
-
----
-
-## 1.4 非木辺と基底の対応
-
-fundamental cycle basis では、
-各基底サイクルは固有の非木辺を1本持つ。
-
-```cpp
-vector<int> chord_of_basis;
-vector<int> basis_of_chord;
-```
-
-これにより、
+メモリ:
 
 ```text
-非木辺 <-> 基底サイクル
+O(N log N + Q)
 ```
 
-の1対1対応を保持する。
+主な問い合わせ:
 
----
+| 操作                               |                           計算量 |
+| ---------------------------------- | -------------------------------: |
+| `rank`, `connected_components` |                         `O(1)` |
+| `connected`, `component_rank`  |                  `O(alpha(N))` |
+| `basis_cycle_size/weight`        |                     `O(log N)` |
+| `materialize_basis_*`            |            `O(log N + answer)` |
+| `coordinate`                     | `O(N+input)`（妥当性検証込み） |
+| `coordinate_unchecked`           |                     `O(input)` |
+| `compose`                        |             `O(N+rank+answer)` |
+| `sparse_coordinate`              |         `O(N+input log input)` |
+| `compose_sparse`                 |          `O(N+k log k+answer)` |
 
-## 1.5 辺・頂点から基底への逆引き
+`materialize_basis_*` の `answer` は出力するサイクル長。
+長さ `K` のサイクルを返す処理には `Omega(K)` が必要なので、これは出力最適。
 
-NMまで許容するため、所属関係を明示的に持つ。
+### 基本API
 
 ```cpp
-vector<vector<int>> basis_of_edge;
-vector<vector<int>> basis_of_vertex;
+cycle_base cy(n);
+cy.reserve_edges(q);
+
+int edge_id = cy.add_edge(u, v);          // weight=1
+int edge_id = cy.add_edge(u, v, weight);
+
+int r = cy.rank();
+int c = cy.connected_components();
 ```
 
-意味:
+全情報は追加時に更新される。旧コードとの互換用に `build()` が存在するが、no-op。
+
+基底IDと辺IDは追加後も変化しない。
+
+```cpp
+int b = cy.basis_of_chord(edge_id); // tree edgeなら-1
+int e = cy.chord_of_basis(b);
+auto descriptor = cy.basis(b);
+```
+
+自己ループは長さ1のbasis、多重辺の2本目は長さ2のbasisになり得る。
+
+### 基底の復元
+
+```cpp
+vector<int> edges = cy.materialize_basis_edges(b);
+vector<int> vertices = cy.materialize_basis_vertices(b);
+```
+
+辺列では最後の辺がchord。
+全基底の一括展開は最悪 `Theta(NQ)` なので提供しない。
+
+### Cycle-space membershipと座標
+
+```cpp
+bool ok = cy.is_cycle_space_element(edge_set);
+vector<int> odd = cy.odd_degree_vertices(edge_set);
+
+vector<bool> coef = cy.coordinate(edge_set);           // Eulerianをassert
+vector<bool> coef = cy.coordinate_unchecked(edge_set); // chord射影のみ
+vector<int> sparse = cy.sparse_coordinate(edge_set);
+```
+
+入力中の同じ辺IDは `F_2` としてXORされる。
+`odd_degree_vertices` はmembership失敗時の証明書にもなる。
+`coordinate` の妥当性検査は `assert` なので、`NDEBUG` 時の非Eulerian入力は利用者責任。
+
+### 座標から辺集合を合成
+
+```cpp
+vector<int> edge_set = cy.compose(coef);
+vector<int> edge_set = cy.compose_sparse(basis_ids);
+```
+
+選択chordの両端にparity差分を置き、forestをpostorderで1回走査する。
+各basisを個別展開してXORしないため、基底の総長に依存しない。
+
+`compose` の結果はEulerian部分グラフであり、単純サイクルとは限らない。
+
+### その他
+
+```cpp
+int dim = cy.component_rank(v);
+bool tree = cy.component_is_tree(v);
+bool unicyclic = cy.component_is_unicyclic(v);
+long long count = cy.cycle_space_size_mod(mod);
+```
+
+### 境界付きcycle space（affine fiber）
+
+指定頂点集合 `T` だけを奇数次数にする辺集合を考える。これは境界方程式
 
 ```text
-basis_of_edge[e]
-    辺 e を含む基底サイクルの一覧
-
-basis_of_vertex[v]
-    頂点 v を含む基底サイクルの一覧
+boundary(x) = T
 ```
 
-これらの総サイズは基底の総長
-
-\[
-L=\sum_i |B_i|
-\]
-
-に比例し、最悪 \(O(NM)\)。
-
----
-
-## 1.6 基底サイクルのグループ
-
-基底サイクル同士が辺を共有するなら同じグループとする。
+の解である。各連結成分に含まれる `T` の頂点数が偶数なら解が存在し、
+全解は特解 `x0` とcycle spaceのアフィン空間 `x0 + Z_1` になる。
 
 ```cpp
-dsu basis_dsu;
+bool possible = cy.boundary_feasible(odd_vertices);
+
+optional<vector<int>> edges =
+    cy.compose_with_boundary(odd_vertices, cycle_coordinate);
+
+optional<vector<int>> st_chain =
+    cy.chain_from_coordinate(s, t, cycle_coordinate);
+
+long long count = cy.boundary_fiber_size_mod(odd_vertices, mod);
 ```
 
-辺 `e` を含む基底一覧
+解が存在する場合、その個数は常に `2^rank`。`compose_with_boundary` は
+forest上のsubtree parityを1回伝播して `O(N+rank+answer)` で構成する。
+
+これはARC115 Dの「指定奇次数集合に対し、木では解が一意、非木辺は自由」という構造と、
+ABC419 Gの「固定`s-t` path + cycle space」を同じAPIへ抽象化したもの。
+
+### 奇サイクル
 
 ```cpp
-basis_of_edge[e]
+bool bipartite = cy.is_bipartite();
+int basis_id = cy.odd_cycle_basis(); // 無ければ-1
+vector<int> cycle = cy.odd_cycle_edges();
 ```
 
-を見て、それらを全て Union する。
+forestのdepth parityが同じ両端を結ぶchordは奇数長fundamental cycleを作る。
+全basisが偶数ならcycle spaceの全要素も偶数なので、グラフは二部グラフ。
 
-保持する:
+## 3. `cycle_core`
+
+cyclomatic rankが小さい問題向けのkernelization。
 
 ```cpp
-vector<int> cycle_component_of_basis;
-vector<vector<int>> cycle_components_of_vertex;
+cycle_core core(n);
+core.add_edge(u, v, weight);
+
+auto compressed = core.compress({s, t});
 ```
 
-重要:
+次を線形時間で行う。
 
-頂点共有だけでは Union しない。
+1. terminalでない次数0/1頂点を反復削除
+2. terminalまたは次数が2でない頂点をjunctionにする
+3. junction間の次数2 pathを重み付き1辺へ縮約
 
-関節点で接する2サイクルは別グループとして扱う。
+各kernel edgeは元の辺ID列を保持するため、列挙結果を元グラフへ復元できる。
+terminal-freeな純cycle成分は、代表junctionを1つ選びself-loopへ圧縮する。
 
----
+これはterminal間simple pathに使われない全ての辺を削除する最小coreではない。
+terminal間の幹へ関節点1個だけで接続されたcyclic blockは残る。そこまで除去するには
+vertex-BCCとblock-cut forest上のterminal Steiner subtreeが必要で、`to_learn.md`へ分離した。
 
-## 1.7 Cycle Space の座標
+連結グラフでterminalが2個、cycle rankを`K`とすると、不要部分の除去後は典型的に
+kernel頂点数 `O(K)`、辺数 `O(K)` となる。ABC419 Gでは頂点数高々`2K+2`、
+辺数高々`3K+1`となり、`2^K`列挙が現実的になる。
 
-fundamental cycle basis を
+## 4. `small_cycle_space64`
 
-\[
-B_0,\dots,B_{K-1}
-\]
-
-とする。
-
-任意の cycle-space element \(C\) は
-
-\[
-C=\bigoplus_i x_iB_i
-\]
-
-と一意に書ける。
-
-fundamental basis では、
-係数 \(x_i\) は対応する非木辺が \(C\) に含まれるかを見るだけで決まる。
-
-そのため座標は
+`cycle_core`などで64辺以下へ圧縮できたグラフを、1つの`uint64_t`で表現する。
 
 ```cpp
-vector<bool>
+auto compressed = core.compress({s, t});
+small_cycle_space64 small(compressed);
+
+uint64_t cycle = small.basis_mask(b);
+uint64_t edge_set = small.compose_mask(coordinate);
+uint64_t coordinate = small.coordinate_mask(edge_set);
+bool eulerian = small.is_cycle_mask(edge_set);
+auto chain = small.affine_mask({s, t}, coordinate);
 ```
 
-または
+`affine_mask(T, coordinate)`は、奇数次数頂点集合が`T`で、指定したcycle座標を持つ
+辺集合を返す。存在しなければ`nullopt`。
+
+### Gray-code列挙
 
 ```cpp
-dynamic_bitset
-```
-
-等で表す。
-
----
-
-# 2. 実装するメソッド
-
-初期API案:
-
-```cpp
-class CycleSpace {
-public:
-    explicit CycleSpace(int n);
-
-    void add_edge(int u, int v);
-    void build();
-
-    int rank() const;
-    int connected_components() const;
-
-    const vector<vector<int>>& basis_edges() const;
-    const vector<vector<int>>& basis_vertices() const;
-
-    const vector<int>& bases_containing_edge(int e) const;
-    const vector<int>& bases_containing_vertex(int v) const;
-
-    bool in_some_cycle(int e) const;
-
-    bool same_cycle(int u, int v) const;
-    vector<int> get_cycle(int u, int v) const;
-
-    vector<bool> coordinate(const vector<int>& edge_set) const;
-    vector<int> compose(const vector<bool>& coef) const;
-
-    int cycle_component_count() const;
-    int cycle_component_of_basis(int i) const;
-    const vector<int>& cycle_components_of_vertex(int v) const;
-};
-```
-
----
-
-# 3. それぞれの方針
-
-## 3.1 `build()`
-
-### 目的
-
-CycleSpace 全体の前計算を行う。
-
-### 方針
-
-1. DFS/BFSで spanning forest を構築
-2. tree edge / non-tree edge を分類
-3. 各 non-tree edge について fundamental cycle を復元
-4. `basis_edges` を構築
-5. `basis_of_edge` を構築
-6. `basis_of_vertex` を構築
-7. 共有辺を持つ基底を Union-Find で統合
-8. 各頂点の cycle component 所属を構築
-
-### 計算量
-
-基底の総長を
-
-\[
-L=\sum_i|B_i|
-\]
-
-とすると、
-
-\[
-O(N+M+L\alpha(M))
-\]
-
-程度。
-
-最悪 \(L=O(NM)\) なので、
-
-\[
-O(NM\alpha(M))
-\]
-
-程度を許容する。
-
----
-
-## 3.2 `rank()`
-
-### 目的
-
-cycle space の次元を返す。
-
-### 方針
-
-\[
-\operatorname{rank}=M-N+C
-\]
-
-または
-
-```cpp
-basis_edges.size()
-```
-
-を返す。
-
-### 計算量
-
-\[
-O(1)
-\]
-
----
-
-## 3.3 `basis_edges()`
-
-### 目的
-
-fundamental cycle basis を辺ID列として取得する。
-
-### 方針
-
-`build()` で明示的に保存する。
-
-各非木辺 \(e=(u,v)\) について、
-
-```text
-u から parent を辿る
-v から parent を辿る
-LCA で合流
-非木辺 e を追加
-```
-
-してサイクルを復元する。
-
-### 計算量
-
-取得自体は参照を返せば
-
-\[
-O(1)
-\]
-
-構築時総計は
-
-\[
-O(L)
-\]
-
-最悪
-
-\[
-O(NM)
-\]
-
----
-
-## 3.4 `basis_vertices()`
-
-### 目的
-
-各基底サイクルを頂点列として取得する。
-
-### 方針
-
-`basis_edges` 構築時に同時に保存するか、
-辺列から頂点列を復元する。
-
-### 計算量
-
-明示保存していれば取得は
-
-\[
-O(1)
-\]
-
-総メモリは
-
-\[
-O(L)
-\]
-
----
-
-## 3.5 `bases_containing_edge(e)`
-
-### 目的
-
-辺 `e` を含む基底サイクル一覧を返す。
-
-### 方針
-
-`build()` 中に各基底を走査し、
-
-```cpp
-basis_of_edge[e].push_back(basis_id);
-```
-
-する。
-
-### 計算量
-
-取得:
-
-\[
-O(1)
-\]
-
-列挙:
-
-\[
-O(\text{answer size})
-\]
-
----
-
-## 3.6 `bases_containing_vertex(v)`
-
-### 目的
-
-頂点 `v` を含む基底サイクル一覧を返す。
-
-### 方針
-
-各基底サイクルの頂点列を走査し、
-
-```cpp
-basis_of_vertex[v].push_back(basis_id);
-```
-
-する。
-
-### 計算量
-
-取得:
-
-\[
-O(1)
-\]
-
-列挙:
-
-\[
-O(\text{answer size})
-\]
-
----
-
-## 3.7 `in_some_cycle(e)`
-
-### 目的
-
-辺 `e` が少なくとも1つの単純サイクルに含まれるか判定する。
-
-### 方針
-
-fundamental cycle basis のどれかに `e` が含まれていれば true。
-
-```cpp
-return !basis_of_edge[e].empty();
-```
-
-これは
-
-```text
-e が bridge ではない
-```
-
-ことと同値。
-
-### 計算量
-
-\[
-O(1)
-\]
-
----
-
-## 3.8 `same_cycle(u, v)`
-
-### 目的
-
-頂点 `u`,`v` を同時に含む単純サイクルが存在するか判定する。
-
-### 方針
-
-各頂点について
-
-```cpp
-cycle_components_of_vertex[v]
-```
-
-を保持する。
-
-`u`,`v` の所属cycle component集合に共通要素があれば true。
-
-```text
-groups[u] ∩ groups[v] != empty
-```
-
-### 注意
-
-関節点は複数のcycle componentに所属しうるため、
-
-```cpp
-component_of_vertex[v]
-```
-
-のような1値では管理できない。
-
-### 計算量
-
-所属groupをソート済みvectorで持つなら、
-
-\[
-O(|G_u|+|G_v|)
-\]
-
-程度。
-
-必要なら各頂点のgroup集合を hash / bitset 等で高速化する。
-
----
-
-## 3.9 `get_cycle(u, v)`
-
-### 目的
-
-`u`,`v` を両方含む単純サイクルを1本構成する。
-
-最短性は要求しない。
-
-### 方針
-
-`same_cycle(u,v)==false` なら失敗。
-
-true の場合、
-共通cycle component内部で `u`,`v` を含む単純サイクルを構成する。
-
-実装候補:
-
-1. 該当component内の基底を利用して構成
-2. componentを誘導部分グラフとして取り出し、
-   2本の internally vertex-disjoint `u-v` path を構成
-3. 必要なら BCC 的な構造を補助的に使う
-
-### 計算量
-
-初期実装では
-
-\[
-O(N+M)
-\]
-
-程度の追加探索を許容する。
-
----
-
-## 3.10 `coordinate(edge_set)`
-
-### 目的
-
-cycle-space element を fundamental basis による座標へ変換する。
-
-入力:
-
-```cpp
-vector<int> edge_set;
-```
-
-出力:
-
-```cpp
-vector<bool> coef;
-```
-
-### 方針
-
-fundamental basis では、
-各基底に固有の非木辺がある。
-
-したがって、
-
-```text
-coef[i] = chord_of_basis[i] が edge_set に含まれるか
-```
-
-を見るだけでよい。
-
-### 前提
-
-入力 `edge_set` が本当に cycle space の元、
-すなわち全頂点偶数次数の辺集合であること。
-
-必要なら validation を行う。
-
-### 計算量
-
-辺集合をbool配列化すれば
-
-\[
-O(M)
-\]
-
-程度。
-
----
-
-## 3.11 `compose(coef)`
-
-### 目的
-
-基底係数から cycle-space element を復元する。
-
-\[
-C=\bigoplus_i x_iB_i
-\]
-
-を計算する。
-
-### 方針
-
-辺ごとのbool配列を用意し、
-
-```cpp
-for (int i = 0; i < K; i++) {
-    if (!coef[i]) continue;
-
-    for (int e : basis_edges[i]) {
-        used[e] ^= 1;
+bool enumerated = small.enumerate_affine(
+    {s, t},
+    22, // 許容する最大rank
+    [&](uint64_t edge_mask, uint64_t coordinate) {
+        if (small.is_simple_path(edge_mask, s, t)) {
+            long long length = small.mask_weight(edge_mask);
+            // 集計
+        }
     }
-}
+);
 ```
 
-する。
+座標をGray code順に列挙するため、隣接状態の辺maskはfundamental cycle 1本分のXORだけ変わる。
+列挙数は`2^rank`なので、事故防止の`max_rank`を必須引数にしている。
 
-### 計算量
+主な計算量:
 
-最悪
+| 操作                |                             計算量 |
+| ------------------- | ---------------------------------: |
+| `build`           | `O(N+M+rank*N)`、ただし`M<=64` |
+| `compose_mask`    |        `O(popcount(coordinate))` |
+| `coordinate_mask` |                        `O(rank)` |
+| `is_cycle_mask`   |                         `O(N+M)` |
+| `affine_mask`     |                      `O(N+rank)` |
+| `is_simple_path`  |                         `O(N+M)` |
+| `mask_weight`     |                           `O(M)` |
+| 全列挙              |           `O(2^rank * callback)` |
 
-\[
-O(L)
-\]
+`is_simple_path`は境界が`s,t`であるだけでなく、選択部分グラフが連結で全内部次数が2かも確認する。
+したがって、離れたcycleを含む一般の`s-t` chainを単純pathから除外できる。
 
-したがって
+`cycle_core::result`から構築した場合、maskの各bitはkernel edgeに対応する。
+元グラフの辺列へ戻すには`compressed.edges[e].original_edges`を展開する。
 
-\[
-O(NM)
-\]
+## 5. `incremental_bridge_graph`
 
-以内。
+サイクル空間の線形代数だけでは、tree edgeが現在bridgeかを高速には判定できない。
+橋と2-edge connectivityは専用データ構造へ分離する。
 
-bitsetで基底を持つ場合は word 単位 XOR に高速化可能。
-
----
-
-## 3.12 `cycle_component_count()`
-
-### 目的
-
-共有辺で連結された基底グループの個数を返す。
-
-### 方針
-
-Union-Findのleader数を数える。
-
-### 計算量
-
-前計算後
-
-\[
-O(1)
-\]
-
----
-
-## 3.13 `cycle_component_of_basis(i)`
-
-### 目的
-
-基底 `i` が属するcycle componentを返す。
-
-### 方針
-
-`build()` 後に DSU leader を連番に圧縮して保存する。
-
-### 計算量
-
-\[
-O(1)
-\]
-
----
-
-## 3.14 `cycle_components_of_vertex(v)`
-
-### 目的
-
-頂点 `v` が属するcycle component一覧を返す。
-
-### 方針
-
-`basis_of_vertex[v]` を見て、
-それぞれの基底のcomponent IDへ写し、重複除去する。
-
-### 計算量
-
-前計算時:
-
-\[
-O(L\log L)
-\]
-
-程度まで許容。
-
-取得時:
-
-\[
-O(1)
-\]
-
----
-
-# 4. 今回は別モジュールにするもの
-
-以下は cycle space の線形構造そのものではなく、
-最適化・単純性・最短路の問題なので別ライブラリに分ける。
+2種類のUnion-Findと親森を用いる既知のincremental bridge algorithmで、
+追加全体を償却 `O((N+Q) log N)` で処理する。
 
 ```cpp
-shortest_cycle();
-shortest_cycle_through(u, v);
-minimum_weight_cycle();
+incremental_bridge_graph graph(n);
+int e = graph.add_edge(u, v);
+
+int count = graph.bridge_count();
+bool bridge = graph.is_bridge(e);
+bool connected = graph.connected(u, v);
+bool same = graph.same_2edge_component(u, v);
 ```
 
-また、
+`same_2edge_component` は「同じ単純サイクル上にある」とは異なる。
+後者はvertex-biconnected componentの問題であり、静的Tarjan/BCCを使う。
+
+辺がbridgeでなくなった原因の追加辺も保持する。
+
+```cpp
+int chord = graph.cycle_witness_edge(e); // bridgeなら-1
+int time = graph.became_cyclic_at(e);    // bridgeなら-1
+```
+
+`cycle_witness_edge(e)` が返すのはwitnessとなる追加辺IDであり、サイクルの辺列ではない。
+必要なら追加履歴または別のforest path構造から復元する。
+
+## 6. `xor_cycle_basis`
+
+各辺に `UInt` 型のXORラベルがあるとする。辺集合上のXORは
+cycle spaceから `F_2^Bits` への線形写像になる。
+
+potential付きUnion-Findでforest pathのXORを保持し、chord `e=(u,v,w)` の追加時に
 
 ```text
-bridge
-articulation point
-BCC
-Block-Cut Tree
+potential[u] XOR potential[v] XOR w
 ```
 
-は LowLink 系として独立させる。
+を数値XOR基底へ挿入する。
 
----
+```cpp
+xor_cycle_basis<uint64_t> xb(n);
+optional<uint64_t> cycle_value = xb.add_edge(u, v, label);
 
-# 5. 設計上の考え方
+uint64_t maximum = xb.maximum_walk_xor(u, v);
+uint64_t minimum = xb.minimum_walk_xor(u, v);
+bool possible = xb.cycle_space_xor_representable(v, x);
+int image_dimension = xb.image_rank(v);
 
-このライブラリの主目的は、
+uint64_t normalized = xb.normalize_cycle_coset(v, x);
+uint64_t canonical = xb.canonical_vertex_value(v);
+```
 
-> 無向グラフの循環構造を、fundamental cycle basis を用いて明示的に保持し、
-> cycle space 上の問い合わせ・構成を行えるようにする
+異なる連結成分のXOR基底は混ぜない。成分結合時に小さい側の数値基底を統合する。
+`Bits=64` なら1回の基底操作は `O(64)`、成分結合は `O(64^2)` 以下の定数時間。
+`Bits` を `UInt` の全bit数より小さくした場合、ラベルと問い合わせ値の上位bitが
+すべて0であることを `assert` で検査する。
 
-こと。
+ここでのwalkは単純pathではない。基準となる `u-v` pathに任意のEulerian辺集合を加えた
+1-chain、すなわち辺や頂点の再訪を許すwalkのXOR極値である。関節点にぶら下がったcycleも
+利用できるため、単純pathの最大XORとは一致しない場合がある。
 
-特に今回は \(O(NM)\) まで許容するため、
+`normalize_cycle_coset(v,x)` は、成分のcycle-imageを加えて得られる値のうち最小のものを返す。
+`canonical_vertex_value(v)` は、その連結成分の最小番号頂点を固定anchorとして、
+anchorから`v`へのpotentialを同様に正規化する。
+同一snapshot・同一成分では
 
 ```text
-圧縮しすぎない
-↓
-基底を全部持つ
-↓
-所属関係も全部持つ
-↓
-問い合わせを簡単にする
+minimum_walk_xor(u,v)
+= canonical_vertex_value(u) XOR canonical_vertex_value(v)
 ```
 
-方針を取る。
+が成り立つ。成分併合でanchorが変わる場合や、辺追加でcycle-imageが広がる場合は
+canonical値も変化するので、同一snapshot内でのみ利用する。
 
-最初から LCA や遅延復元などで複雑化せず、
-まずは正しさと使いやすさを優先する。
+## 7. コアから外した機能
 
-必要になった時点で、
+次は別問題なので、この高速コアには含めない。
+
+- 頂点biconnected components / block-cut tree
+- 2頂点を含む単純サイクルの構成
+- 最短サイクル
+- minimum weight cycle basis
+- 全basisの一括展開
+- 各辺・頂点を含む全basisの逆引き
+
+非負重みのminimum cycle basisは、Horton候補を重み順にmatroid greedyする別モジュールが標準的。
+候補cycleの独立性判定には辺数 `M` bitではなく、このライブラリのchord座標 `rank` bitを使える。
+
+削除込みでrankだけ必要なら、辺の有効区間を時間segment treeへ載せ、rollback DSUで
+各時刻の `m_active-n+components` を求める方が適切。
+
+## 8. 設計上の下界
 
 ```text
-明示基底
-→ bitset
-→ LCA
-→ 遅延復元
+全basisの総長:          Theta(NQ) になり得る
+長さKのcycle witness:  Omega(K)
+辺を含む全basis列挙:   Omega(rank) になり得る
+compose/list出力:       Omega(answer)
 ```
 
-の順に高速化する。
+したがって、高速な辺追加と全基底の常時明示保持は両立しない。
+本ライブラリはdescriptorを正本にし、必要な出力だけを遅延生成する。
