@@ -11,32 +11,28 @@ double pie = M_PI;
 //studied form https://lets-csharp.com/sort-using-cross-products/
 
 // Sort vectors counterclockwise from the positive x-axis, without atan2.
-class decsort {
-public:
-    struct point {
-        long long x, y;
-    };
+struct point {
+    long long x, y;
 
-private:
+    bool operator<(const point& other) const {
+        const bool this_upper = y > 0 || (y == 0 && x >= 0);
+        const bool other_upper = other.y > 0 || (other.y == 0 && other.x >= 0);
+        if (this_upper != other_upper) return this_upper;
+
+        const __int128 c = (__int128)x * other.y - (__int128)y * other.x;
+        if (c != 0) return c > 0;
+
+        const unsigned __int128 ax = x < 0 ? -(__int128)x : x;
+        const unsigned __int128 ay = y < 0 ? -(__int128)y : y;
+        const unsigned __int128 bx = other.x < 0 ? -(__int128)other.x : other.x;
+        const unsigned __int128 by = other.y < 0 ? -(__int128)other.y : other.y;
+        return ax * ax + ay * ay < bx * bx + by * by;
+    }
+};
+
+struct decsort {
     vector<point> upper, lower;
 
-    static __int128 cross(const point& a, const point& b) {
-        return (__int128)a.x * b.y - (__int128)a.y * b.x;
-    }
-
-    static unsigned __int128 norm2(const point& p) {
-        const unsigned __int128 x = p.x < 0 ? -(__int128)p.x : p.x;
-        const unsigned __int128 y = p.y < 0 ? -(__int128)p.y : p.y;
-        return x * x + y * y;
-    }
-
-    static bool angle_less(const point& a, const point& b) {
-        const __int128 c = cross(a, b);
-        if (c != 0) return c > 0;
-        return norm2(a) < norm2(b);
-    }
-
-public:
     decsort() = default;
 
     void add(long long x, long long y) {
@@ -49,8 +45,8 @@ public:
     // Equal-angle vectors are ordered by distance from the origin.
     // Time: O(n log n); extra space for the returned vector: O(n).
     std::vector<point> sort() {
-        std::sort(upper.begin(), upper.end(), angle_less);
-        std::sort(lower.begin(), lower.end(), angle_less);
+        std::sort(upper.begin(), upper.end());
+        std::sort(lower.begin(), lower.end());
         std::vector<point> result;
         result.reserve(upper.size() + lower.size());
         result.insert(result.end(), upper.begin(), upper.end());
